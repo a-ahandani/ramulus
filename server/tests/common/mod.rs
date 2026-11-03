@@ -161,10 +161,11 @@ impl Stream {
     pub fn until(&mut self, text: &str) {
         let mut buf = [0u8; 4096];
         while !self.seen.contains(text) {
-            let n = self.res.body_mut().as_reader().read(&mut buf).unwrap();
-            if n == 0 {
-                panic!("stream ended before {text:?}; saw {:?}", self.seen);
-            }
+            let n = match self.res.body_mut().as_reader().read(&mut buf) {
+                Ok(0) => panic!("stream ended before {text:?}; saw {:?}", self.seen),
+                Ok(n) => n,
+                Err(e) => panic!("stream failed before {text:?}: {e}; saw {:?}", self.seen),
+            };
             self.seen.push_str(&String::from_utf8_lossy(&buf[..n]));
         }
     }
