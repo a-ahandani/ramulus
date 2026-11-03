@@ -21,9 +21,16 @@ fn versions(old: &str, new: &str) -> FileVersions {
     }
 }
 
+/// The helper commits, stashes and rebases as the repository's own user, so each test repository names one.
+fn identity(dir: &Path) {
+    git(dir, &["config", "user.name", "Test"]);
+    git(dir, &["config", "user.email", "t@example.com"]);
+}
+
 fn init(dir: &Path) {
     git(dir, &["init", "-q", "-b", "main"]);
     git(dir, &["config", "core.autocrlf", "false"]);
+    identity(dir);
 }
 
 #[tokio::test]
@@ -229,6 +236,7 @@ async fn push_when_the_remote_moved_on() {
     git(&root, &["init", "-q", "--bare", "-b", "main", "remote.git"]);
     git(&root, &["clone", "-q", "remote.git", "mine"]);
     let (mine, theirs) = (root.join("mine"), root.join("theirs"));
+    identity(&mine);
     write(&mine, "a.txt", "a\n");
     git(&mine, &["add", "."]);
     git(&mine, &["commit", "-qm", "base"]);
@@ -277,6 +285,7 @@ async fn switching_to_a_remote_branch() {
     git(&root, &["init", "-q", "--bare", "-b", "main", "remote.git"]);
     git(&root, &["clone", "-q", "-c", "core.autocrlf=false", "remote.git", "mine"]);
     let (mine, theirs) = (root.join("mine"), root.join("theirs"));
+    identity(&mine);
     write(&mine, "a.txt", "one\n");
     write(&mine, "b.txt", "b\n");
     git(&mine, &["add", "."]);
