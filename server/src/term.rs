@@ -62,7 +62,7 @@ struct Session {
     agent: Option<String>,
     state: Mutex<State>,
     tx: broadcast::Sender<Msg>,
-    master: Mutex<Box<dyn MasterPty + Send>>,
+    master: Mutex<Option<Box<dyn MasterPty + Send>>>,
     writer: Mutex<Box<dyn Write + Send>>,
     killer: Mutex<Box<dyn ChildKiller + Send + Sync>>,
 }
@@ -135,7 +135,8 @@ fn take_utf8(pending: &mut Vec<u8>) -> String {
     }
 }
 
-fn pump(mut reader: Box<dyn Read + Send>, mut child: Box<dyn Child + Send + Sync>, s: Arc<Session>, k: String, sessions: Sessions) {
+/// Forwards the terminal's output until the pty closes.
+fn pump(mut reader: Box<dyn Read + Send>, s: &Session) {
     let mut pending = Vec::new();
     let mut chunk = [0u8; 8192];
     loop {
@@ -157,7 +158,13 @@ fn pump(mut reader: Box<dyn Read + Send>, mut child: Box<dyn Child + Send + Sync
         }
         let _ = s.tx.send(Msg::Data(text));
     }
+}
+
+/// Waits for the child, closes the pty so the reader ends (Windows' console pipe stays open until then), and reports the exit.
+fn wait_exit(mut child: Box<dyn Child + Send + Sync>, reader: std::thread::JoinHandle<()>, s: Arc<Session>, k: String, sessions: Sessions) {
     let code = child.wait().ok().map(|st| st.exit_code());
+    drop(s.master.lock().unwrap().take());
+    let _ = reader.join();
     let mut st = s.state.lock().unwrap();
     st.exit = Some(code);
     let mut map = sessions.lock().unwrap();
@@ -180,9 +187,10 @@ impl Terminals {
         let mut sessions = self.sessions.lock().unwrap();
         if let Some(old) = sessions.get(&k) {
             // a size nudge makes a full-screen program repaint for the tab that came back
-            let m = old.master.lock().unwrap();
-            let _ = m.resize(pty(c, r.saturating_sub(1).max(5)));
-            let _ = m.resize(pty(c, r));
+            if let Some(m) = old.master.lock().unwrap().as_ref() {
+                let _ = m.resize(pty(c, r.saturating_sub(1).max(5)));
+                let _ = m.resize(pty(c, r));
+            }
             return Ok(Started {
                 agent: old.agent.clone(),
                 fresh: false,
@@ -218,14 +226,16 @@ impl Terminals {
             agent: agent.clone(),
             state: Mutex::new(State { buf: String::new(), exit: None }),
             tx,
-            master: Mutex::new(pair.master),
+            master: Mutex::new(Some(pair.master)),
             writer: Mutex::new(writer),
             killer: Mutex::new(killer),
         });
         sessions.insert(k.clone(), s.clone());
         drop(sessions);
         let all = self.sessions.clone();
-        std::thread::spawn(move || pump(reader, child, s, k, all));
+        let for_reader = s.clone();
+        let reading = std::thread::spawn(move || pump(reader, &for_reader));
+        std::thread::spawn(move || wait_exit(child, reading, s, k, all));
         Ok(Started { agent, fresh: true })
     }
 
@@ -304,7 +314,9 @@ impl Terminals {
 
     pub fn resize(&self, repo: &str, id: &str, cols: Option<i64>, rows: Option<i64>) {
         if let Some(s) = self.get(repo, id) {
-            let _ = s.master.lock().unwrap().resize(pty(size(cols, 20, 500, 80), size(rows, 5, 200, 24)));
+            if let Some(m) = s.master.lock().unwrap().as_ref() {
+                let _ = m.resize(pty(size(cols, 20, 500, 80), size(rows, 5, 200, 24)));
+            }
         }
     }
 

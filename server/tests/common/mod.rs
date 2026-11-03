@@ -147,7 +147,11 @@ impl Server {
     pub fn stream(&self, path: &str) -> Stream {
         let res = self.get(path);
         assert_eq!(res.status().as_u16(), 200);
-        Stream { res, seen: String::new(), terminal: None }
+        Stream {
+            res,
+            seen: String::new(),
+            terminal: None,
+        }
     }
 
     /// A terminal's output stream that, like a terminal emulator, answers the cursor-position query ConPTY waits for.
@@ -159,7 +163,15 @@ impl Server {
 }
 
 pub fn urlencode(s: &str) -> String {
-    s.bytes().map(|b| if b.is_ascii_alphanumeric() || b"-_.~".contains(&b) { (b as char).to_string() } else { format!("%{b:02X}") }).collect()
+    s.bytes()
+        .map(|b| {
+            if b.is_ascii_alphanumeric() || b"-_.~".contains(&b) {
+                (b as char).to_string()
+            } else {
+                format!("%{b:02X}")
+            }
+        })
+        .collect()
 }
 
 pub struct Stream {
