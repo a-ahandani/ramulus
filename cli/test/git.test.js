@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { execFileSync } from 'node:child_process'
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { after, before, describe, it } from 'node:test'
@@ -86,6 +86,18 @@ describe('git helper', () => {
     assert.equal(data.local[0].ahead, 0)
     await git.unstage(dir, ['h.txt'])
     await git.discard(dir, [{ path: 'h.txt', kind: 'M' }])
+  })
+
+  it('counts lines for a file renamed inside a folder', async () => {
+    mkdirSync(join(dir, 'src'))
+    writeFileSync(join(dir, 'src', 'a.ts'), 'a\nb\n')
+    await git.stage(dir, ['src/a.ts'])
+    await git.commit(dir, 'add a.ts', false)
+    sh('mv', 'src/a.ts', 'src/b.ts')
+    writeFileSync(join(dir, 'src', 'b.ts'), 'a\nb\nc\n')
+    await git.stage(dir, ['src/b.ts'])
+    assert.deepEqual((await git.status(dir)).staged, [{ path: 'src/b.ts', kind: 'M', added: 1, deleted: 0 }])
+    sh('reset', '-q', '--hard')
   })
 
   it('lists tracked files and leaves untracked ones to status', async () => {

@@ -89,13 +89,21 @@ export function parseStatus(porcelainZ) {
   return out
 }
 
+// The new path of a numstat rename, written as `src/{a.ts => b.ts}` or `a.ts => b.ts`; other paths come back as they are.
+function renamedTo(path) {
+  const after = (s) => s.split(' => ').pop()
+  const l = path.indexOf('{')
+  const r = path.indexOf('}')
+  return l >= 0 && r > l ? path.slice(0, l) + after(path.slice(l + 1, r)) + path.slice(r + 1) : after(path)
+}
+
 function parseNumstat(text) {
   const out = new Map()
   for (const line of text.split('\n')) {
     const [a, d, ...rest] = line.split('\t')
     const path = rest.join('\t')
     if (!path) continue
-    out.set(path.includes(' => ') ? path.split(' => ').pop().replace(/\}$/, '') : path, { added: a === '-' ? 0 : Number(a), deleted: d === '-' ? 0 : Number(d) })
+    out.set(renamedTo(path), { added: a === '-' ? 0 : Number(a), deleted: d === '-' ? 0 : Number(d) })
   }
   return out
 }
