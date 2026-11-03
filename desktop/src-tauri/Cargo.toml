@@ -1,6 +1,6 @@
 [package]
 name = "ramulus-desktop"
-version = "0.6.12"
+version = "0.7.0"
 edition = "2021"
 license = "MIT"
 description = "Ramulus as a desktop app: the native helper and the UI in one window."
