@@ -6,7 +6,7 @@ use std::path::Path;
 fn repo(root: &Path, name: &str) -> std::path::PathBuf {
     let d = root.join(name);
     git(root, &["init", "-q", "-b", "main", s(&d)]);
-    std::fs::canonicalize(d).unwrap()
+    toplevel(&d)
 }
 
 fn names(v: &serde_json::Value) -> Vec<String> {

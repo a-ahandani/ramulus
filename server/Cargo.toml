@@ -26,4 +26,4 @@ getrandom = "0.3"
 libc = "0.2"
 
 [dev-dependencies]
-ureq = { version = "3", features = ["json"] }
+ureq = { version = "3", default-features = false, features = ["json"] }

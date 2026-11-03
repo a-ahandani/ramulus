@@ -15,7 +15,14 @@ pub fn tmp(prefix: &str) -> PathBuf {
     let name: String = b.iter().map(|x| format!("{x:02x}")).collect();
     let p = std::env::temp_dir().join(format!("{prefix}{name}"));
     std::fs::create_dir_all(&p).unwrap();
-    std::fs::canonicalize(p).unwrap()
+    // the real path, since macOS puts temp folders behind a symlink; without Windows' verbatim prefix, which git rejects
+    let real = std::fs::canonicalize(p).unwrap().to_string_lossy().into_owned();
+    PathBuf::from(real.strip_prefix(r"\\?\").unwrap_or(&real))
+}
+
+/// The repository path as git itself reports it, which is what the helper stores and compares.
+pub fn toplevel(dir: &Path) -> PathBuf {
+    PathBuf::from(git(dir, &["rev-parse", "--show-toplevel"]).trim())
 }
 
 pub fn git(cwd: &Path, args: &[&str]) -> String {
