@@ -2,6 +2,11 @@ name: Desktop
 on:
   push:
     tags: ['desktop-v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: The desktop-v* tag whose release gets the bundles
+        required: true
 permissions:
   contents: write
 jobs:
@@ -55,7 +60,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           projectPath: desktop
-          tagName: ${{ github.ref_name }}
-          releaseName: Ramulus ${{ github.ref_name }}
+          tagName: ${{ github.event.inputs.tag || github.ref_name }}
+          releaseName: Ramulus ${{ github.event.inputs.tag || github.ref_name }}
           releaseDraft: true
           args: ${{ matrix.args }}
