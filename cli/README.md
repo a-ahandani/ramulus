@@ -18,6 +18,7 @@ Options: `--port N` to pick a port, `--no-open` to only print the URL. The helpe
 - Commit graph with lanes, branches, tags, stashes, staging with diffs, commit and amend, merge, rebase, cherry-pick, revert, reset, fetch, pull, push, and a banner with Continue and Abort when a merge or rebase stops on conflicts.
 - Open several repositories in a left sidebar that stays docked or auto-hides, pin favourites to the top, search them with ⌘⇧A, and pull or fetch all of them at once.
 - Rebase with uncommitted changes and undo it afterwards; a rejected push offers rebase, merge or a safe force push.
+- A terminal panel built for Claude Code: Shift+Enter or Option+Enter adds a line to the prompt, pasting an image hands it to Claude Code from the clipboard, and rendering runs on the GPU.
 - Optional help from the AI agent you already use (Claude Code, Codex, Gemini CLI or opencode), with no API key: draft commit messages and branch names, and run the agent's own interactive tool in a terminal panel (⌃\`) to chat with it or have it fix conflicts. Ramulus asks first and sends nothing until you turn it on.
 - A diff view on Monaco that takes the graph's place, where every opened file is a tab, with side-by-side or inline layout, hidden-region folds, an editable working-tree side saved with ⌘S, and block-level stage, unstage and discard; drag a branch label onto a commit to merge or rebase; solo branches; command palette (⌘⇧P); shortcuts list (?); tree or flat file lists with +/− counts; resizable panels; status bar; light and dark themes.
 
