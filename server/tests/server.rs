@@ -155,7 +155,7 @@ fn runs_the_agent_in_a_terminal_and_streams_what_it_prints() {
     let (_root, repo, srv) = ai_server();
     srv.result("setAi", json!({ "settings": { "enabled": true } }));
     assert_eq!(srv.result("termStart", json!({ "agent": "claude", "cols": 80, "rows": 24 }))["fresh"], true);
-    let mut stream = srv.stream(&format!("/api/term?token={TOKEN}&repo={}", urlencode(s(&repo))));
+    let mut stream = srv.term_stream(s(&repo), "main");
     srv.result("termInput", json!({ "data": "hello ramulus\r" }));
     stream.until("hello ramulus");
     assert_eq!(srv.result("termStart", json!({ "agent": "claude", "cols": 100, "rows": 30 }))["fresh"], false);
@@ -167,7 +167,7 @@ fn runs_the_agent_in_a_terminal_and_streams_what_it_prints() {
 fn keeps_each_terminal_tab_separate_and_stops_them_one_at_a_time() {
     let (_root, repo, srv) = ai_server();
     srv.result("setAi", json!({ "settings": { "enabled": true } }));
-    let stream = |id: &str| srv.stream(&format!("/api/term?token={TOKEN}&repo={}&id={id}", urlencode(s(&repo))));
+    let stream = |id: &str| srv.term_stream(s(&repo), id);
     assert_eq!(srv.result("termStart", json!({ "id": "one", "agent": "claude", "cols": 80, "rows": 24 }))["fresh"], true);
     assert_eq!(srv.result("termStart", json!({ "id": "two", "agent": "claude", "cols": 80, "rows": 24 }))["fresh"], true);
     assert_eq!(
@@ -207,10 +207,10 @@ fn replays_what_a_terminal_printed_before_the_tab_attached() {
     srv.result("termStart", json!({ "id": "late", "agent": "claude", "cols": 80, "rows": 24 }));
     srv.result("termInput", json!({ "id": "late", "data": "typed before attach\r" }));
     std::thread::sleep(std::time::Duration::from_millis(500));
-    let mut stream = srv.stream(&format!("/api/term?token={TOKEN}&repo={}&id=late", urlencode(s(&repo))));
+    let mut stream = srv.term_stream(s(&repo), "late");
     stream.until("typed before attach");
     srv.result("termStop", json!({ "id": "late" }));
     stream.until("event: exit");
-    let mut gone = srv.stream(&format!("/api/term?token={TOKEN}&repo={}&id=late", urlencode(s(&repo))));
+    let mut gone = srv.term_stream(s(&repo), "late");
     gone.until("event: exit\ndata: null");
 }

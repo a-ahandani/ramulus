@@ -147,13 +147,25 @@ impl Server {
     pub fn stream(&self, path: &str) -> Stream {
         let res = self.get(path);
         assert_eq!(res.status().as_u16(), 200);
-        Stream { res, seen: String::new() }
+        Stream { res, seen: String::new(), terminal: None }
     }
+
+    /// A terminal's output stream that, like a terminal emulator, answers the cursor-position query ConPTY waits for.
+    pub fn term_stream(&self, repo: &str, id: &str) -> Stream {
+        let mut stream = self.stream(&format!("/api/term?token={TOKEN}&repo={}&id={id}", urlencode(repo)));
+        stream.terminal = Some((self.agent.clone(), self.base.clone(), repo.to_string(), id.to_string()));
+        stream
+    }
+}
+
+pub fn urlencode(s: &str) -> String {
+    s.bytes().map(|b| if b.is_ascii_alphanumeric() || b"-_.~".contains(&b) { (b as char).to_string() } else { format!("%{b:02X}") }).collect()
 }
 
 pub struct Stream {
     res: ureq::http::Response<ureq::Body>,
     pub seen: String,
+    terminal: Option<(ureq::Agent, String, String, String)>,
 }
 
 impl Stream {
@@ -166,7 +178,14 @@ impl Stream {
                 Ok(n) => n,
                 Err(e) => panic!("stream failed before {text:?}: {e}; saw {:?}", self.seen),
             };
-            self.seen.push_str(&String::from_utf8_lossy(&buf[..n]));
+            let chunk = String::from_utf8_lossy(&buf[..n]).into_owned();
+            self.seen.push_str(&chunk);
+            if let Some((agent, base, repo, id)) = &self.terminal {
+                for _ in 0..chunk.matches("\\u001b[6n").count() {
+                    let body = serde_json::json!({ "repo": repo, "id": id, "data": "\x1b[1;1R" });
+                    agent.post(&format!("{base}/api/termInput")).header("x-ramulus-token", TOKEN).send_json(&body).unwrap();
+                }
+            }
         }
     }
 }
