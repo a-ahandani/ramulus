@@ -7,8 +7,34 @@ permissions:
 jobs:
   test:
     uses: ./.github/workflows/cli.yml
+  binaries:
+    strategy:
+      matrix:
+        include:
+          - { os: macos-latest, target: aarch64-apple-darwin }
+          - { os: macos-latest, target: x86_64-apple-darwin }
+          - { os: ubuntu-22.04, target: x86_64-unknown-linux-gnu }
+          - { os: ubuntu-22.04-arm, target: aarch64-unknown-linux-gnu }
+          - { os: windows-latest, target: x86_64-pc-windows-msvc }
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - run: cargo test
+        working-directory: server
+      - run: cargo build --release --target ${{ matrix.target }}
+        working-directory: server
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.target }}
+          path: |
+            target/${{ matrix.target }}/release/ramulus
+            target/${{ matrix.target }}/release/ramulus.exe
+          if-no-files-found: error
   publish:
-    needs: test
+    needs: [test, binaries]
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -25,5 +51,25 @@ jobs:
         working-directory: web
       - run: npm ci
         working-directory: cli
+      - uses: actions/download-artifact@v4
+        with:
+          path: binaries
+      - name: Publish one package per platform, then the main package that depends on them
+        # Trusted publishing cannot create a package, so the platform packages' first release uses the NPM_TOKEN secret; once they exist and have a trusted publisher, delete the secret.
+        env:
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          set -e
+          version=$(node -p "require('./cli/package.json').version")
+          for target in binaries/*; do
+            t=$(basename "$target")
+            bin=$(ls "$target"/ramulus "$target"/ramulus.exe 2>/dev/null | head -1)
+            out=cli/platform/$t
+            node server/npm/make.mjs "$t" "$bin" "$out"
+            if [ -n "$NPM_TOKEN" ]; then echo "//registry.npmjs.org/:_authToken=$NPM_TOKEN" > "$out/.npmrc"; fi
+            (cd "$out" && npm publish --access public)
+            name=$(node -p "require('./$out/package.json').name")
+            (cd cli && npm pkg set "optionalDependencies.$name=$version")
+          done
       - run: npm publish --access public
         working-directory: cli

@@ -263,15 +263,16 @@ fn with_stats(files: &mut [FileChange], stats: &HashMap<String, (u64, u64)>) {
 }
 
 pub async fn status(dir: &str) -> Result<WorkStatus> {
-    let (st, unstaged, staged) = tokio::join!(
+    let (st, unstaged, staged, state) = tokio::join!(
         run(dir, &["status", "--porcelain=v1", "-z", "--untracked-files=all"], None),
         try_run(dir, &["diff", "--numstat", "-M"], None),
         try_run(dir, &["diff", "--numstat", "-M", "--cached"], None),
+        state_of(dir),
     );
     let mut parsed = parse_status(&st?.text());
     with_stats(&mut parsed.unstaged, &parse_numstat(&unstaged?.text()));
     with_stats(&mut parsed.staged, &parse_numstat(&staged?.text()));
-    parsed.state = state_of(dir).await?;
+    parsed.state = state?;
     Ok(parsed)
 }
 
@@ -392,12 +393,26 @@ fn count_after(track: &str, word: &str) -> u64 {
 }
 
 pub async fn load(dir: &str, limit: usize) -> Result<RepoData> {
-    let head_branch = Some(text_or_empty(dir, &["symbolic-ref", "-q", "--short", "HEAD"]).await?).filter(|s| !s.is_empty());
-    let head_oid = Some(text_or_empty(dir, &["rev-parse", "-q", "--verify", "HEAD"]).await?).filter(|s| !s.is_empty());
+    let refs_args = [
+        "for-each-ref",
+        "--format=%(refname)%00%(objectname)%00%(*objectname)%00%(symref)%00%(upstream:short)%00%(upstream:track)",
+        "refs/heads",
+        "refs/remotes",
+        "refs/tags",
+    ];
+    // these read different things, so they run at once; the log waits for the stash list it must skip past
+    let (head_branch, head_oid, refs, stash_list, status) = tokio::join!(
+        text_or_empty(dir, &["symbolic-ref", "-q", "--short", "HEAD"]),
+        text_or_empty(dir, &["rev-parse", "-q", "--verify", "HEAD"]),
+        run(dir, &refs_args, None),
+        try_run(dir, &["stash", "list", "--format=%H%x00%s"], None),
+        status(dir),
+    );
+    let head_branch = Some(head_branch?).filter(|s| !s.is_empty());
+    let head_oid = Some(head_oid?).filter(|s| !s.is_empty());
     let mut refs_by_oid: HashMap<String, Vec<RefLabel>> = HashMap::new();
     let (mut local, mut remote, mut tags) = (vec![], vec![], vec![]);
-    let format = "--format=%(refname)%00%(objectname)%00%(*objectname)%00%(symref)%00%(upstream:short)%00%(upstream:track)";
-    let refs = run(dir, &["for-each-ref", format, "refs/heads", "refs/remotes", "refs/tags"], None).await?.text();
+    let refs = refs?.text();
     for line in refs.split('\n').filter(|l| !l.is_empty()) {
         let f: Vec<&str> = line.split(NUL).collect();
         let get = |i: usize| f.get(i).copied().unwrap_or("");
@@ -450,12 +465,7 @@ pub async fn load(dir: &str, limit: usize) -> Result<RepoData> {
         }
     }
     let mut stashes = vec![];
-    for line in try_run(dir, &["stash", "list", "--format=%H%x00%s"], None)
-        .await?
-        .text()
-        .split('\n')
-        .filter(|l| !l.is_empty())
-    {
+    for line in stash_list?.text().split('\n').filter(|l| !l.is_empty()) {
         let (oid, message) = line.split_once(NUL).unwrap_or((line, ""));
         stashes.push(StashInfo {
             index: stashes.len(),
@@ -488,7 +498,7 @@ pub async fn load(dir: &str, limit: usize) -> Result<RepoData> {
         remote,
         tags,
         stashes,
-        status: status(dir).await?,
+        status: status?,
         has_more,
         native: true,
     })

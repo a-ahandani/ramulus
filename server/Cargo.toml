@@ -27,8 +27,3 @@ libc = "0.2"
 
 [dev-dependencies]
 ureq = { version = "3", features = ["json"] }
-
-[profile.release]
-lto = true
-codegen-units = 1
-strip = true

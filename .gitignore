@@ -2,4 +2,6 @@ web/node_modules
 web/dist
 cli/ui
 cli/node_modules
-server/target
+target
+cli/platform
+desktop/src-tauri/gen

@@ -4,10 +4,35 @@ import { spawn } from 'node:child_process'
 import { existsSync, statSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { createRequire } from 'node:module'
 import { gitProblem, run, toplevel } from '../lib/git.js'
 import { createServer } from '../lib/server.js'
 
 const args = process.argv.slice(2)
+const here = dirname(fileURLToPath(import.meta.url))
+
+// The native helper ships as one package per platform. Without one (an unsupported platform, a checkout, or RAMULUS_NODE=1) the Node helper below serves instead.
+function nativeHelper() {
+  if (process.env.RAMULUS_NODE) return undefined
+  try {
+    return createRequire(import.meta.url).resolve(`ramulus-${process.platform}-${process.arch}/bin/ramulus${process.platform === 'win32' ? '.exe' : ''}`)
+  } catch {
+    return undefined
+  }
+}
+
+const native = nativeHelper()
+if (native) {
+  const child = spawn(native, [...args, '--ui', join(here, '..', 'ui')], { stdio: 'inherit' })
+  // the helper stops its agents on these signals, so pass them on and exit with its code; a Windows console sends Ctrl+C to it directly
+  if (process.platform !== 'win32') for (const signal of ['SIGINT', 'SIGTERM', 'SIGHUP']) process.on(signal, () => child.kill(signal))
+  child.on('error', (e) => {
+    console.error(e.message)
+    process.exit(1)
+  })
+  child.on('exit', (code) => process.exit(code ?? 1))
+  await new Promise(() => {})
+}
 if (args.includes('-h') || args.includes('--help')) {
   console.log('Usage: ramulus [path] [--port N] [--no-open]\n\nServes the Ramulus UI for the repository at path (default: current directory).')
   process.exit(0)
@@ -35,7 +60,7 @@ const dir = await toplevel(root).catch((e) => {
   if (!/not a git repository/.test(e.message)) console.error(e.message.trim())
 })
 
-const uiDir = join(dirname(fileURLToPath(import.meta.url)), '..', 'ui')
+const uiDir = join(here, '..', 'ui')
 if (!existsSync(join(uiDir, 'index.html'))) {
   console.error('The UI build is missing. Run `npm run build` in the cli folder first.')
   process.exit(1)
