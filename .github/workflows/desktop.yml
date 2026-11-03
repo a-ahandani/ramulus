@@ -37,6 +37,19 @@ jobs:
         shell: bash
         run: |
           { echo "TAURI_SIGNING_PRIVATE_KEY<<EOF"; echo "$KEY"; echo "EOF"; echo "TAURI_SIGNING_PRIVATE_KEY_PASSWORD=$PASSWORD"; } >> "$GITHUB_ENV"
+      # Apple signing and notarization, so macOS opens the app without calling it damaged: a Developer ID certificate as base64 .p12, and an App Store Connect sign-in
+      - if: runner.os == 'macOS' && env.CERT != ''
+        env:
+          CERT: ${{ secrets.APPLE_CERTIFICATE }}
+          CERT_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        shell: bash
+        run: |
+          { echo "APPLE_CERTIFICATE=$CERT"; echo "APPLE_CERTIFICATE_PASSWORD=$CERT_PASSWORD"; echo "APPLE_SIGNING_IDENTITY=$IDENTITY"; } >> "$GITHUB_ENV"
+          if [ -n "$APPLE_ID" ]; then { echo "APPLE_ID=$APPLE_ID"; echo "APPLE_PASSWORD=$APPLE_PASSWORD"; echo "APPLE_TEAM_ID=$APPLE_TEAM_ID"; } >> "$GITHUB_ENV"; fi
       - uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
