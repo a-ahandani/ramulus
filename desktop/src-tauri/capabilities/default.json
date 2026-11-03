@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "The window shows the local helper's own page, which needs no commands from the app.",
+  "windows": ["main"],
+  "permissions": ["core:default"]
+}

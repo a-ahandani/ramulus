@@ -110,7 +110,7 @@ export function AgentTerminal(p: {
   useEffect(() => {
     let gone = false
     let cleanup = () => {}
-    Promise.all([import('@xterm/xterm'), import('@xterm/addon-fit'), import('@xterm/xterm/css/xterm.css')]).then(([{ Terminal }, { FitAddon }]) => {
+    Promise.all([import('@xterm/xterm'), import('@xterm/addon-fit'), import('@xterm/addon-webgl'), import('@xterm/xterm/css/xterm.css')]).then(([{ Terminal }, { FitAddon }, { WebglAddon }]) => {
       const el = host.current
       if (gone || !el) return
       const theme = () => {
@@ -121,6 +121,12 @@ export function AgentTerminal(p: {
       const fit = new FitAddon()
       xt.loadAddon(fit)
       xt.open(el)
+      // the GPU renderer; when its context is lost, xterm's DOM renderer takes over
+      try {
+        const gl = new WebglAddon()
+        gl.onContextLoss(() => gl.dispose())
+        xt.loadAddon(gl)
+      } catch {}
       fit.fit()
       let pending = ''
       let sending = false
@@ -137,10 +143,31 @@ export function AgentTerminal(p: {
         }
         sending = false
       }
-      xt.onData((d) => {
+      const send = (d: string) => {
         pending += d
         flush()
+      }
+      xt.onData(send)
+      // a backslash before Return is Claude Code's newline in every terminal, so Shift+Enter and Option+Enter send that
+      xt.attachCustomKeyEventHandler((e) => {
+        if (e.type === 'keydown' && e.key === 'Enter' && (e.shiftKey || e.altKey)) {
+          e.preventDefault()
+          send('\\\r')
+          return false
+        }
+        return true
       })
+      // a pasted image reaches Claude Code as its Ctrl+V, and it takes the picture from the clipboard itself
+      el.addEventListener(
+        'paste',
+        (e) => {
+          if (![...(e.clipboardData?.items ?? [])].some((i) => i.type.startsWith('image/'))) return
+          e.preventDefault()
+          e.stopPropagation()
+          send('\x16')
+        },
+        true,
+      )
       let lastOutput = 0
       let detach = () => {}
       const start = async () => {

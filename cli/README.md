@@ -10,7 +10,7 @@ npx ramulus ~/code     # or a folder of repositories, each opens in its own tab
 
 ![The Ramulus branch graph](https://raw.githubusercontent.com/a-ahandani/ramulus/main/docs/screenshots/overview.png)
 
-Options: `--port N` to pick a port, `--no-open` to only print the URL.
+Options: `--port N` to pick a port, `--no-open` to only print the URL. The helper is a native binary on macOS, Windows and Linux (x64 and arm64), with the Node helper as the fallback; `RAMULUS_NODE=1` forces the Node one.
 
 - Needs Node 20 or newer and `git` on your PATH. Works on macOS, Windows and Linux.
 - Everything runs through your installed git, so SSH keys, credential helpers, hooks and LFS behave exactly as on the command line.
@@ -18,6 +18,7 @@ Options: `--port N` to pick a port, `--no-open` to only print the URL.
 - Commit graph with lanes, branches, tags, stashes, staging with diffs, commit and amend, merge, rebase, cherry-pick, revert, reset, fetch, pull, push, and a banner with Continue and Abort when a merge or rebase stops on conflicts.
 - Open several repositories in a left sidebar that stays docked or auto-hides, pin favourites to the top, search them with ⌘⇧A, and pull or fetch all of them at once.
 - Rebase with uncommitted changes and undo it afterwards; a rejected push offers rebase, merge or a safe force push.
+- A terminal panel built for Claude Code: Shift+Enter or Option+Enter adds a line to the prompt, pasting an image hands it to Claude Code from the clipboard, and rendering runs on the GPU.
 - Optional help from the AI agent you already use (Claude Code, Codex, Gemini CLI or opencode), with no API key: draft commit messages and branch names, and run the agent's own interactive tool in a terminal panel (⌃\`) to chat with it or have it fix conflicts. Ramulus asks first and sends nothing until you turn it on.
 - A diff view on Monaco that takes the graph's place, where every opened file is a tab, with side-by-side or inline layout, hidden-region folds, an editable working-tree side saved with ⌘S, and block-level stage, unstage and discard; drag a branch label onto a commit to merge or rebase; solo branches; command palette (⌘⇧P); shortcuts list (?); tree or flat file lists with +/− counts; resizable panels; status bar; light and dark themes.
 
