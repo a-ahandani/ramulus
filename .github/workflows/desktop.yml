@@ -29,11 +29,17 @@ jobs:
         working-directory: web
       - run: npm ci && npm run build
         working-directory: cli
+      # an unset secret must not reach Tauri as an empty key, so it is exported only when present
+      - if: env.KEY != ''
+        env:
+          KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        shell: bash
+        run: |
+          { echo "TAURI_SIGNING_PRIVATE_KEY<<EOF"; echo "$KEY"; echo "EOF"; echo "TAURI_SIGNING_PRIVATE_KEY_PASSWORD=$PASSWORD"; } >> "$GITHUB_ENV"
       - uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
           projectPath: desktop
           tagName: ${{ github.ref_name }}
