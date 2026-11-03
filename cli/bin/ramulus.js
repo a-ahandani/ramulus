@@ -4,21 +4,17 @@ import { spawn } from 'node:child_process'
 import { existsSync, statSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { createRequire } from 'node:module'
 import { gitProblem, run, toplevel } from '../lib/git.js'
 import { createServer } from '../lib/server.js'
 
 const args = process.argv.slice(2)
 const here = dirname(fileURLToPath(import.meta.url))
 
-// The native helper ships as one package per platform. Without one (an unsupported platform, a checkout, or RAMULUS_NODE=1) the Node helper below serves instead.
+// The package carries the native helper for each platform. Without one (an unsupported platform, a checkout, or RAMULUS_NODE=1) the Node helper below serves instead.
 function nativeHelper() {
   if (process.env.RAMULUS_NODE) return undefined
-  try {
-    return createRequire(import.meta.url).resolve(`ramulus-${process.platform}-${process.arch}/bin/ramulus${process.platform === 'win32' ? '.exe' : ''}`)
-  } catch {
-    return undefined
-  }
+  const file = join(here, '..', 'native', `${process.platform}-${process.arch}`, process.platform === 'win32' ? 'ramulus.exe' : 'ramulus')
+  return existsSync(file) ? file : undefined
 }
 
 const native = nativeHelper()

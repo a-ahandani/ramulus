@@ -3,5 +3,5 @@ web/dist
 cli/ui
 cli/node_modules
 target
-cli/platform
+cli/native
 desktop/src-tauri/gen

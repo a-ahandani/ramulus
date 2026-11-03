@@ -10,7 +10,7 @@ npx ramulus ~/code     # or a folder of repositories, each opens in its own tab
 
 ![The Ramulus branch graph](https://raw.githubusercontent.com/a-ahandani/ramulus/main/docs/screenshots/overview.png)
 
-Options: `--port N` to pick a port, `--no-open` to only print the URL. The helper is a native binary on macOS, Windows and Linux (x64 and arm64), with the Node helper as the fallback; `RAMULUS_NODE=1` forces the Node one.
+Options: `--port N` to pick a port, `--no-open` to only print the URL. The package carries a native helper for macOS, Windows and Linux (x64 and arm64) and falls back to the Node helper elsewhere; `RAMULUS_NODE=1` forces the Node one.
 
 - Needs Node 20 or newer and `git` on your PATH. Works on macOS, Windows and Linux.
 - Everything runs through your installed git, so SSH keys, credential helpers, hooks and LFS behave exactly as on the command line.
