@@ -98,9 +98,10 @@ export function useAgentPanel(p: {
   const agentName = (id: string) => p.agents.find((a) => a.id === id)?.name ?? id
   const words = query.trim().toLowerCase().split(/\s+/).filter(Boolean)
   const found = past.filter((s) => words.every((w) => `${s.title} ${agentName(s.agent)}`.toLowerCase().includes(w)))
+  // like the tabs, only opening History takes the keyboard, not coming back to this repository
   useEffect(() => {
     if (history && shown && p.active) search.current?.focus()
-  }, [history, shown, p.active])
+  }, [history, shown])
 
   const openAgent = async (conflictFile?: string) => {
     const picked = await p.pickAgent().catch((e) => void p.say(e))
