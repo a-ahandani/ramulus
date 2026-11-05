@@ -3,7 +3,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from 'preact/hooks'
 import type { CiRun } from '../git/backend'
 import type { RowLayout } from '../git/graph'
 import type { BranchInfo, Commit, RefLabel } from '../git/repo'
-import { ago, Avatar, CI_ICON, CI_WORD, ciState, fmtDate, Icon, laneColor, Laptop, short } from './bits'
+import { ago, Avatar, CI_ICON, CI_WORD, ciState, fmtDate, Icon, laneColor, Laptop, short, type wipTally } from './bits'
 
 export const ROW_H = 30
 const COL_W = 24
@@ -39,7 +39,7 @@ export interface GraphProps {
   showEdges: boolean
   selectedIndex: number
   scrollTo?: number
-  wipCount: number
+  wip: ReturnType<typeof wipTally>
   hasMore: boolean
   soloCount: number
   onSelect: (index: number) => void
@@ -133,13 +133,7 @@ function Lanes({ lay, kind, author, email, drawEdges }: { lay: RowLayout; kind: 
         </text>
       </g>
     )
-  else if (kind === 'wip')
-    node = (
-      <g>
-        <circle cx={nx} cy={mid} r={NODE_R} fill="var(--app-bg)" stroke={color} stroke-width={2} stroke-dasharray="3 2.5" />
-        <circle cx={nx} cy={mid} r={4} fill={color} />
-      </g>
-    )
+  else if (kind === 'wip') node = <circle cx={nx} cy={mid} r={NODE_R} fill="var(--app-bg)" stroke={color} stroke-width={2} stroke-dasharray="3 2.5" />
   else node = <circle cx={nx} cy={mid} r={NODE_R} fill="var(--app-bg)" stroke={color} stroke-width={2} />
   return (
     <div class="lanes" style={{ position: 'relative' }}>
@@ -377,7 +371,27 @@ export function GraphView(p: GraphProps) {
               <Icon name={CI_ICON[ci]} />
             </button>
           )}
-          {c.kind === 'wip' ? `Uncommitted changes · ${p.wipCount} file${p.wipCount === 1 ? '' : 's'}` : c.summary}
+          {c.kind === 'wip' ? (
+            <>
+              <span class="wip-label">{'// WIP'}</span>
+              {(
+                [
+                  ['M', 'edit', 'modified'],
+                  ['A', 'add', 'added'],
+                  ['D', 'remove', 'deleted'],
+                ] as const
+              ).map(([k, icon, word]) =>
+                p.wip[k] > 0 && (
+                  <span class={`wip-count ${k}`} role="img" aria-label={`${p.wip[k]} ${word}`} title={`${p.wip[k]} ${word}`}>
+                    <Icon name={icon} />
+                    {p.wip[k]}
+                  </span>
+                ),
+              )}
+            </>
+          ) : (
+            c.summary
+          )}
         </div>
         {showWhen && (
           <div class="date" title={c.kind !== 'wip' ? fmtDate(c.time) : undefined}>

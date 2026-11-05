@@ -862,9 +862,45 @@ select {
   display: block;
 }
 
-.row .msg.wip,
 .row .msg.stash {
   color: var(--fg-2);
+}
+
+.wip-label {
+  display: inline-flex;
+  align-items: center;
+  box-sizing: border-box;
+  min-width: 96px;
+  height: 20px;
+  margin-right: 12px;
+  padding: 0 8px;
+  border: 1px solid var(--input-border);
+  border-radius: 4px;
+  background: var(--input);
+  color: var(--placeholder);
+  font-family: var(--mono);
+  font-size: 12px;
+  vertical-align: middle;
+}
+
+.wip-count {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-right: 10px;
+  vertical-align: middle;
+}
+
+.wip-count.M .codicon {
+  color: var(--git-modified);
+}
+
+.wip-count.A .codicon {
+  color: var(--git-added);
+}
+
+.wip-count.D .codicon {
+  color: var(--git-deleted);
 }
 
 .row .date,
