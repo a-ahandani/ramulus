@@ -358,3 +358,30 @@ describe('switching to a remote branch', () => {
     assert.match(read('b.txt'), /<<<<<<<|mine/)
   })
 })
+
+describe('deleting a branch on its remote', () => {
+  let root
+  const g = (cwd, ...args) => execFileSync('git', ['-c', 'user.name=Test', '-c', 'user.email=t@example.com', ...args], { cwd, encoding: 'utf8' })
+
+  before(() => {
+    root = mkdtempSync(join(tmpdir(), 'ramulus-delremote-'))
+    g(root, 'init', '-q', '--bare', '-b', 'main', 'remote.git')
+    g(root, 'clone', '-q', 'remote.git', 'mine')
+    writeFileSync(join(root, 'mine', 'a.txt'), 'a\n')
+    g(join(root, 'mine'), 'add', '.')
+    g(join(root, 'mine'), 'commit', '-qm', 'base')
+    g(join(root, 'mine'), 'push', '-q', 'origin', 'main', 'main:feat/done')
+    g(join(root, 'mine'), 'fetch', '-q')
+  })
+
+  after(() => rmSync(root, { recursive: true, force: true }))
+
+  it('pushes the deletion to the remote the name starts with, and refuses names of no remote', async () => {
+    const mine = join(root, 'mine')
+    await git.deleteRemoteBranch(mine, 'origin/feat/done')
+    assert.equal(g(root, '--git-dir', 'remote.git', 'branch', '--list', 'feat/done'), '')
+    assert.equal(g(mine, 'branch', '-r', '--list', 'origin/feat/done'), '')
+    await assert.rejects(git.deleteRemoteBranch(mine, 'elsewhere/main'), /No remote has the branch/)
+    await assert.rejects(git.deleteRemoteBranch(mine, 'origin/-f'), /Invalid name/)
+  })
+})

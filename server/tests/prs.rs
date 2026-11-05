@@ -7,7 +7,7 @@ use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 
-const LIST: &str = r#"[{"number":7,"title":"Add login","url":"https://github.com/o/r/pull/7","headRefName":"login","state":"OPEN","isDraft":true},{"number":3,"title":"Old","url":"https://github.com/o/r/pull/3","headRefName":"old","state":"MERGED","isDraft":false}]"#;
+const LIST: &str = r#"[{"number":7,"title":"Add login","url":"https://github.com/o/r/pull/7","headRefName":"login","headRefOid":"aaa1","baseRefName":"main","state":"OPEN","isDraft":true},{"number":3,"title":"Old","url":"https://github.com/o/r/pull/3","headRefName":"old","headRefOid":"bbb2","baseRefName":"main","state":"MERGED","isDraft":false}]"#;
 
 struct Stub {
     root: PathBuf,
@@ -81,8 +81,8 @@ async fn reads_them_through_gh_retrying_without_a_token_that_gh_rejects() {
     assert_eq!(
         list,
         vec![
-            json!({ "number": 7, "title": "Add login", "url": "https://github.com/o/r/pull/7", "branch": "login", "state": "DRAFT" }),
-            json!({ "number": 3, "title": "Old", "url": "https://github.com/o/r/pull/3", "branch": "old", "state": "MERGED" }),
+            json!({ "number": 7, "title": "Add login", "url": "https://github.com/o/r/pull/7", "branch": "login", "oid": "aaa1", "base": "main", "state": "DRAFT" }),
+            json!({ "number": 3, "title": "Old", "url": "https://github.com/o/r/pull/3", "branch": "old", "oid": "bbb2", "base": "main", "state": "MERGED" }),
         ]
     );
 }

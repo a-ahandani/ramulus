@@ -55,7 +55,7 @@ pub struct App {
 }
 
 const SHELL_OPS: [&str; 10] = ["repos", "pins", "setPins", "prefs", "setPrefs", "findRepos", "pickFolder", "ai", "setAi", "openRepo"];
-const REPO_OPS: [&str; 48] = [
+const REPO_OPS: [&str; 49] = [
     "load",
     "init",
     "files",
@@ -79,6 +79,7 @@ const REPO_OPS: [&str; 48] = [
     "checkoutCommit",
     "createBranch",
     "deleteBranch",
+    "deleteRemoteBranch",
     "renameBranch",
     "createTag",
     "deleteTag",
@@ -412,6 +413,7 @@ impl App {
                 .await
                 .and_then(|_| done()),
             "deleteBranch" => git::delete_branch(repo, &b.string("name")).await.and_then(|_| done()),
+            "deleteRemoteBranch" => git::delete_remote_branch(repo, &b.string("name")).await.and_then(|_| done()),
             "renameBranch" => git::rename_branch(repo, &b.string("oldName"), &b.string("newName")).await.and_then(|_| done()),
             "createTag" => git::create_tag(repo, &b.string("name"), &b.string("at"), b.str("message")).await.and_then(|_| done()),
             "deleteTag" => git::delete_tag(repo, &b.string("name")).await.and_then(|_| done()),

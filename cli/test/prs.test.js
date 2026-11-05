@@ -8,7 +8,7 @@ import { changePullRequest, mergePullRequest, prConversation, pullRequest, pullR
 
 const root = mkdtempSync(join(tmpdir(), 'ramulus-prs-'))
 const bin = join(root, 'bin')
-const LIST = '[{"number":7,"title":"Add login","url":"https://github.com/o/r/pull/7","headRefName":"login","state":"OPEN","isDraft":true},{"number":3,"title":"Old","url":"https://github.com/o/r/pull/3","headRefName":"old","state":"MERGED","isDraft":false}]'
+const LIST = '[{"number":7,"title":"Add login","url":"https://github.com/o/r/pull/7","headRefName":"login","headRefOid":"aaa1","baseRefName":"main","state":"OPEN","isDraft":true},{"number":3,"title":"Old","url":"https://github.com/o/r/pull/3","headRefName":"old","headRefOid":"bbb2","baseRefName":"main","state":"MERGED","isDraft":false}]'
 
 after(() => rmSync(root, { recursive: true, force: true }))
 
@@ -28,8 +28,8 @@ describe('pull requests', { skip: process.platform === 'win32' }, () => {
   it('reads them through gh, retrying without a token that gh rejects', async () => {
     const list = await pullRequests(repo('a'), { PATH: bin, GITHUB_TOKEN: 'stale' })
     assert.deepEqual(list, [
-      { number: 7, title: 'Add login', url: 'https://github.com/o/r/pull/7', branch: 'login', state: 'DRAFT' },
-      { number: 3, title: 'Old', url: 'https://github.com/o/r/pull/3', branch: 'old', state: 'MERGED' },
+      { number: 7, title: 'Add login', url: 'https://github.com/o/r/pull/7', branch: 'login', oid: 'aaa1', base: 'main', state: 'DRAFT' },
+      { number: 3, title: 'Old', url: 'https://github.com/o/r/pull/3', branch: 'old', oid: 'bbb2', base: 'main', state: 'MERGED' },
     ])
   })
 

@@ -433,6 +433,13 @@ export async function deleteBranch(dir, name) {
   await run(dir, ['branch', '-D', '--', safeName(name)])
 }
 
+export async function deleteRemoteBranch(dir, name) {
+  const remotes = (await run(dir, ['remote'])).stdout.trim().split('\n').filter(Boolean)
+  const remote = remotes.filter((r) => typeof name === 'string' && name.startsWith(`${r}/`)).sort((a, b) => b.length - a.length)[0]
+  if (!remote) throw new Error(`No remote has the branch ${JSON.stringify(name)}`)
+  await run(dir, ['push', '--delete', '--', remote, safeName(name.slice(remote.length + 1))])
+}
+
 export async function renameBranch(dir, oldName, newName) {
   await run(dir, ['branch', '-m', '--', safeName(oldName), safeName(newName)])
 }

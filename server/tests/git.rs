@@ -381,3 +381,29 @@ async fn switching_to_a_remote_branch() {
     assert!(b.contains("<<<<<<<") || b.contains("mine"));
     std::fs::remove_dir_all(&root).unwrap();
 }
+
+#[tokio::test]
+async fn delete_a_branch_on_its_remote() {
+    let root = tmp("ramulus-delremote-");
+    git(&root, &["init", "-q", "--bare", "-b", "main", "remote.git"]);
+    git(&root, &["clone", "-q", "remote.git", "mine"]);
+    let mine = root.join("mine");
+    identity(&mine);
+    write(&mine, "a.txt", "a\n");
+    git(&mine, &["add", "."]);
+    git(&mine, &["commit", "-qm", "base"]);
+    git(&mine, &["push", "-q", "origin", "main", "main:feat/done"]);
+    git(&mine, &["fetch", "-q"]);
+
+    // pushes the deletion to the remote the name starts with, and refuses names of no remote
+    git::delete_remote_branch(s(&mine), "origin/feat/done").await.unwrap();
+    assert_eq!(git(&root, &["--git-dir", "remote.git", "branch", "--list", "feat/done"]), "");
+    assert_eq!(git(&mine, &["branch", "-r", "--list", "origin/feat/done"]), "");
+    assert!(git::delete_remote_branch(s(&mine), "elsewhere/main")
+        .await
+        .unwrap_err()
+        .0
+        .contains("No remote has the branch"));
+    assert!(git::delete_remote_branch(s(&mine), "origin/-f").await.unwrap_err().0.contains("Invalid name"));
+    std::fs::remove_dir_all(&root).unwrap();
+}
