@@ -150,7 +150,8 @@ describe('AI through the helper', () => {
     }
     assert.equal((await call('termStart', { id: 'one', agent: 'claude', cols: 80, rows: 24 })).result.fresh, true)
     assert.equal((await call('termStart', { id: 'two', agent: 'claude', cols: 80, rows: 24 })).result.fresh, true)
-    assert.deepEqual((await call('termList')).result, [
+    // Windows' cmd.exe names its window as it starts, so the titles can be there already
+    assert.deepEqual((await call('termList')).result.map(({ title, ...t }) => t), [
       { id: 'one', kind: 'agent', agent: 'claude' },
       { id: 'two', kind: 'agent', agent: 'claude' },
     ])

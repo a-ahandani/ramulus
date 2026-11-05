@@ -170,8 +170,11 @@ fn keeps_each_terminal_tab_separate_and_stops_them_one_at_a_time() {
     let stream = |id: &str| srv.term_stream(s(&repo), id);
     assert_eq!(srv.result("termStart", json!({ "id": "one", "agent": "claude", "cols": 80, "rows": 24 }))["fresh"], true);
     assert_eq!(srv.result("termStart", json!({ "id": "two", "agent": "claude", "cols": 80, "rows": 24 }))["fresh"], true);
+    // Windows' cmd.exe names its window as it starts, so the titles can be there already
+    let mut tabs = srv.result("termList", json!({}));
+    tabs.as_array_mut().unwrap().iter_mut().for_each(|t| drop(t.as_object_mut().unwrap().remove("title")));
     assert_eq!(
-        srv.result("termList", json!({})),
+        tabs,
         json!([{ "id": "one", "kind": "agent", "agent": "claude" }, { "id": "two", "kind": "agent", "agent": "claude" }])
     );
     let mut one = stream("one");
