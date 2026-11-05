@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'preact/hooks'
 import type { CheckState, CiRun, PullRequest, TermTab } from '../git/backend'
-import type { BranchInfo } from '../git/repo'
+import type { BranchInfo, ChangeKind, WorkStatus } from '../git/repo'
 
 export const LANES = 10
 
@@ -14,6 +14,15 @@ export function Laptop() {
       <path d="M1.5 12.5h13" stroke-linecap="round" />
     </svg>
   )
+}
+
+/** Uncommitted files by kind, one kind per file: a file staged as added and edited again still counts as added. */
+export function wipTally(s: WorkStatus) {
+  const kinds = new Map<string, ChangeKind>()
+  for (const f of [...s.staged, ...s.unstaged]) if ((kinds.get(f.path) ?? 'M') === 'M') kinds.set(f.path, f.kind)
+  const tally = { M: 0, A: 0, D: 0 }
+  for (const k of kinds.values()) tally[k === '?' ? 'A' : k]++
+  return tally
 }
 
 export function Icon({ name }: { name: string }) {

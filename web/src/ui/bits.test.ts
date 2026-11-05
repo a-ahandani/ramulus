@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { ago, cannotFastForward, ciByCommit, ciState, finished, mergedBranches, prsByBranch, settleLimited, termTitle, webUrl } from './bits'
+import { ago, cannotFastForward, ciByCommit, ciState, finished, mergedBranches, prsByBranch, settleLimited, termTitle, webUrl, wipTally } from './bits'
 
 describe('settleLimited', () => {
   it('never runs more than the limit at once and keeps results in order', async () => {
@@ -99,5 +99,24 @@ describe('ciState', () => {
     const by = ciByCommit([run('a', 'pass'), run('a', 'running'), run('b', 'pass'), run('b', 'fail'), run('b', 'running'), run('c', 'skipped'), run('c', 'pass')])
     expect([...by.keys()]).toEqual(['a', 'b', 'c'])
     expect(['a', 'b', 'c', 'none'].map((sha) => ciState(by.get(sha)))).toEqual(['running', 'fail', 'pass', undefined])
+  })
+})
+
+describe('wipTally', () => {
+  it('counts each file once, by its change against the last commit', () => {
+    const tally = wipTally({
+      staged: [
+        { path: 'new.ts', kind: 'A' },
+        { path: 'gone.ts', kind: 'M' },
+        { path: 'edit.ts', kind: 'M' },
+      ],
+      unstaged: [
+        { path: 'new.ts', kind: 'M' },
+        { path: 'gone.ts', kind: 'D' },
+        { path: 'edit.ts', kind: 'M' },
+        { path: 'untracked.ts', kind: '?' },
+      ],
+    })
+    expect(tally).toEqual({ M: 1, A: 2, D: 1 })
   })
 })

@@ -6,7 +6,7 @@ import { PAGE, type Commit, type DiffArea, type FileChange, type NetSettings, ty
 import type { Scheme } from '../git/scheme'
 import { AiConsent, AiSettingsDialog } from './Ai'
 import { useAgentPanel } from './AgentPanel'
-import { BrandMark, CI_WORD, Icon, cannotFastForward, ciByCommit, ciState, clamp, laneColor, mergedBranches, prsByBranch, short, stored, webUrl } from './bits'
+import { BrandMark, CI_WORD, Icon, cannotFastForward, ciByCommit, ciState, clamp, laneColor, mergedBranches, prsByBranch, short, stored, webUrl, wipTally } from './bits'
 import { DetailPanel, type FileSel } from './DetailPanel'
 import { PrCard } from './PrView'
 import { DiffWindow, tabKey, type DiffOptions, type DiffTab } from './DiffWindow'
@@ -1138,7 +1138,8 @@ export function App(p: { be: Backend; name: string; active: boolean; theme: Them
   const current = sel?.kind === 'commit' ? v.rows[v.indexOf.get(sel.oid) ?? -1] : undefined
   const layoutOf = (i: number) => soloInfo?.layoutByIndex.get(i) ?? v.layout[i]
   const currentColor = current ? laneColor(layoutOf(v.indexOf.get(current.id)!).column) : 'var(--lane-0)'
-  const wipCount = new Set([...v.data.status.staged, ...v.data.status.unstaged].map((f) => f.path)).size
+  const wip = wipTally(v.data.status)
+  const wipCount = wip.M + wip.A + wip.D
   const branchOf = (r: { name: string; kind: string }) => (r.kind === 'head' ? r.name : r.kind === 'remote' ? r.name.slice(r.name.indexOf('/') + 1) : '')
   const mode: LeftMode = leftMode === 'commit' && !current ? 'changes' : leftMode
   const shownPr =
@@ -1325,7 +1326,7 @@ export function App(p: { be: Backend; name: string; active: boolean; theme: Them
           showEdges={filter.trim().length === 0}
           selectedIndex={selectedIndex}
           scrollTo={scrollTo}
-          wipCount={wipCount}
+          wip={wip}
           hasMore={v.data.hasMore && !soloInfo}
           soloCount={solo.size}
           onSelect={(i) => {
