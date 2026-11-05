@@ -39,6 +39,7 @@ export function httpBackend(base: string, token: string, repo?: string): Backend
       const d = await call<Omit<RepoData, 'refsByOid'> & { refsByOid: Record<string, RefLabel[]> }>('load', { limit })
       return { ...d, refsByOid: new Map(Object.entries(d.refsByOid)) }
     },
+    init: () => call('init'),
     status: () => call('status'),
     files: () => call('files'),
     prs: () => call('prs'),

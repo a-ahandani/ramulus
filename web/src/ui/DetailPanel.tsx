@@ -206,13 +206,8 @@ export function DetailPanel(p: DetailProps) {
   }
   const s = p.data.status
   const canCommit = (s.staged.length > 0 || p.amend) && p.summary.trim().length > 0
-  const label = p.amend
-    ? 'Amend last commit'
-    : s.staged.length === 0
-      ? 'Stage something first'
-      : p.summary.trim().length === 0
-        ? 'Add a summary first'
-        : `Commit ${s.staged.length} file${s.staged.length === 1 ? '' : 's'}`
+  const label = p.amend ? 'Amend' : s.staged.length ? `Commit ${s.staged.length} file${s.staged.length === 1 ? '' : 's'}` : 'Commit'
+  const why = !s.staged.length && !p.amend ? 'Stage a change first' : !p.summary.trim() ? 'Write a summary first' : '⌘⏎'
   const isSel = (area: DiffArea['kind'], path: string) => p.selectedFile?.area.kind === area && p.selectedFile.path === path
   const state = s.state
   const conflicts = s.unstaged.filter((f) => f.conflict).length
@@ -222,7 +217,7 @@ export function DetailPanel(p: DetailProps) {
       {p.top}
       {autostash && (
         <div class="banner">
-          <span>{conflicts > 0 ? `Your uncommitted changes conflicted when they were put back. Resolve and stage ${conflicts === 1 ? 'the file' : `the ${conflicts} files`} marked !, then press Done.` : 'A saved copy of your uncommitted changes is still in the stash. Press Done once your files look right.'}</span>
+          <span>{conflicts > 0 ? `Your changes conflicted when put back. Resolve and stage ${conflicts === 1 ? 'the file' : `the ${conflicts} files`} marked !` : 'A copy of your changes is still stashed. Done drops it.'}</span>
           <button disabled={conflicts > 0} onClick={p.onDropAutostash} title="Drop the saved copy from the stash">
             Done
           </button>
@@ -264,13 +259,13 @@ export function DetailPanel(p: DetailProps) {
         </div>
         <input placeholder="Summary" value={p.summary} onInput={(e) => p.onSummary((e.target as HTMLInputElement).value)} />
         <textarea placeholder="Description" value={p.description} onInput={(e) => p.onDescription((e.target as HTMLTextAreaElement).value)} />
-        {p.summary.length > 72 && <div class="warn">Keep the summary under 72 characters so other tools show it in full.</div>}
+        {p.summary.length > 72 && <div class="warn">{p.summary.length}/72: other tools cut longer summaries</div>}
         <div class="actions">
           <label>
             <input type="checkbox" checked={p.amend} onChange={(e) => p.onAmend((e.target as HTMLInputElement).checked)} style={{ width: 'auto' }} /> Amend
           </label>
           <span class="right" />
-          <button class="primary" disabled={!canCommit} onClick={p.onCommit} title="⌘⏎">
+          <button class="primary" disabled={!canCommit} onClick={p.onCommit} title={why}>
             <Icon name="check" />
             <span>{label}</span>
           </button>

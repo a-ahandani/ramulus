@@ -54,6 +54,9 @@ Ramulus is Latin for a small branch.
 - Pull all (fast-forward only) and Fetch all update every open repository, three at a time so the app stays responsive.
 - Branches with a pull request on GitHub show its number. Click it to open the pull request in Ramulus: description with its images and videos, checks (refreshing while they run), and one timeline of comments, reviews and review threads, each thread shown with the lines of code it is about, with GitHub's Merge options (merge commit, squash, rebase). Resolved threads and bot comments fold away. It all goes through the GitHub CLI (`gh`) you are already signed in to, what GitHub sends is sanitized, media loads only from GitHub's own hosts so tracking pixels stay out, and Ramulus fetches after a merge so it shows in the graph.
 - Rebase with uncommitted changes: they are stashed and put back for you, and the rebase can be undone afterwards. A rejected push offers rebase, merge or a safe force push instead of an error.
+- Drag a project in the sidebar to reorder it, or press ⌥↑ and ⌥↓. Rest the pointer on one to see its agent and terminal tabs, and click one to jump straight to it.
+- A folder without git opens too, with its terminals and agent, and a button to start a repository in it.
+- Quit and reopen Ramulus and you are where you left off: the same projects in the same order, each terminal tab with what it printed, and every Claude Code tab resuming its own conversation.
 - Only the visible tab watches its folder, so hidden tabs cost nothing and catch up when you come back.
 - Light and dark themes, or any color scheme from [terminalcolors.com](https://terminalcolors.com/): paste the link of its page and the whole app, the diff and the agent terminal take its colors.
 - Resizable panels, tree or flat file lists with +/− counts, and a status bar with sync, change and stash counts and a refresh button.
@@ -65,6 +68,7 @@ Ramulus is Latin for a small branch.
 - Ramulus looks for Claude Code, Codex, Gemini CLI and opencode on your PATH and asks before using any of them. Pick one if several are installed. Each uses its own sign-in, so there is no API key to add.
 - The sparkle in the commit box drafts a message from the staged changes, and the one in the new-branch dialog suggests a name. Both fill the field for you to review and edit.
 - The Agent button in the top bar (or ⌃\`) opens a panel at the bottom that runs the agent's own interactive tool in the repository's folder, so you can chat with it as you would in your own terminal. Add more tabs with +, for another agent or a plain terminal, and maximize the panel when you want the whole window. The sparkle on a conflicted file pastes a resolve prompt into it without sending it, so you can change it first. The agent then edits the file with its own approvals, and the result shows up as an unstaged change for you to review.
+- Each agent tab is named after the conversation, the way Claude Code titles its terminal, with a spinner while it works.
 - Every prompt can be edited in AI agent settings in the command palette.
 
 ### Keyboard
@@ -74,6 +78,7 @@ Ramulus is Latin for a small branch.
 | `⌘⇧P` | Command palette: every action, branch and tag |
 | `⌘F` | Search commits |
 | `⌘⇧A` | Search open and recent repositories |
+| `⌥↑` / `⌥↓` | Move a project in the sidebar |
 | `↑` `↓` or `J` `K` | Move through commits |
 | `⌘⏎` | Commit |
 | `⌘⇧S` / `⌘⇧U` | Stage / unstage everything |
@@ -84,7 +89,7 @@ Ramulus is Latin for a small branch.
 | `` ⌃` `` | Show or hide the agent panel |
 | `?` | All shortcuts |
 
-Use Ctrl instead of ⌘ on Windows and Linux.
+Use Ctrl instead of ⌘, and Alt instead of ⌥, on Windows and Linux.
 
 ## Other ways to run it
 

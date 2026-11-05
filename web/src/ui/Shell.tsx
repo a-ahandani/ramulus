@@ -63,7 +63,7 @@ const fallbackAuthor = () => {
 const keepsSidebar = () => !!document.querySelector('.sidebar :focus-visible')
 
 const ALL_AT_ONCE = 3
-const sameSummary = (a: RepoSummary | undefined, b: RepoSummary) => !!a && a.branch === b.branch && a.changes === b.changes && a.ahead === b.ahead && a.behind === b.behind && a.busy === b.busy
+const sameSummary = (a: RepoSummary | undefined, b: RepoSummary) => !!a && a.branch === b.branch && a.changes === b.changes && a.ahead === b.ahead && a.behind === b.behind && a.busy === b.busy && a.noGit === b.noGit
 const isMergeMethod = (m: unknown): m is MergeMethod => m === 'merge' || m === 'squash' || m === 'rebase'
 
 export function Shell() {
@@ -72,7 +72,8 @@ export function Shell() {
   const [theme, setTheme] = useState<Theme>(initialTheme)
   const [scheme, setScheme] = useState<Scheme | undefined>(initialScheme)
   const applied = useRef<string[]>([])
-  const prefsReady = useRef(!helper)
+  // the saved preferences, open repositories among them, are written only once they have been read
+  const [prefsReady, setPrefsReady] = useState(!helper)
   const [mergeMethod, setMergeMethod] = useState<MergeMethod>('merge')
   const [summaries, setSummaries] = useState<Record<number, RepoSummary>>({})
   const [menu, setMenu] = useState<MenuState>()
@@ -99,6 +100,10 @@ export function Shell() {
   const tabsRef = useRef(tabs)
   tabsRef.current = tabs
   const current = tabs.find((t) => t.id === active)
+  const openKeys = tabs
+    .slice(0, 50)
+    .map((t) => t.key)
+    .join('\n')
 
   useLayoutEffect(() => {
     const root = document.documentElement
@@ -112,19 +117,8 @@ export function Shell() {
       if (scheme) localStorage.setItem('ramulus.scheme', JSON.stringify(scheme))
       else localStorage.removeItem('ramulus.scheme')
     } catch {}
-    if (prefsReady.current) helper?.setPrefs({ theme, scheme: scheme ?? null, mergeMethod }).catch(() => {})
-  }, [theme, scheme, mergeMethod])
-  useEffect(() => {
-    helper
-      ?.prefs()
-      .then((prefs) => {
-        if (prefs.theme === 'dark' || prefs.theme === 'light') setTheme(prefs.theme)
-        setScheme(isScheme(prefs.scheme) ? prefs.scheme : undefined)
-        if (isMergeMethod(prefs.mergeMethod)) setMergeMethod(prefs.mergeMethod)
-      })
-      .catch(() => {})
-      .finally(() => (prefsReady.current = true))
-  }, [])
+    if (prefsReady) helper?.setPrefs({ theme, scheme: scheme ?? null, mergeMethod, open: openKeys.split('\n').filter(Boolean) }).catch(() => {})
+  }, [theme, scheme, mergeMethod, openKeys, prefsReady])
   useEffect(() => {
     document.title = current ? `${current.name} · Ramulus` : 'Ramulus'
   }, [current])
@@ -135,7 +129,7 @@ export function Shell() {
   useEffect(() => {
     if (docked || !shown) return
     const away = (e: MouseEvent) => {
-      if (e.clientX > sideW + 40 && !keepsSidebar()) setShown(false)
+      if (e.clientX > sideW + 40 && !keepsSidebar() && !document.querySelector('.sidebar:hover')) setShown(false)
     }
     addEventListener('mousemove', away)
     return () => removeEventListener('mousemove', away)
@@ -200,6 +194,27 @@ export function Shell() {
     helper?.setPins([...pinnedKeys.current]).catch((e) => fail('Could not save pinned repositories', e))
   }
 
+  const move = (id: number, target: number, after: boolean) => {
+    const moved = tabsRef.current.find((t) => t.id === id)
+    if (!moved || id === target) return
+    const rest = tabsRef.current.filter((t) => t.id !== id)
+    rest.splice(rest.findIndex((t) => t.id === target) + (after ? 1 : 0), 0, moved)
+    tabsRef.current = rest
+    setTabs(rest)
+    if (!moved.pinned) return
+    const open = rest.filter((t) => t.pinned).map((t) => t.key)
+    pinnedKeys.current = new Set([...open, ...pinnedKeys.current])
+    helper?.setPins([...pinnedKeys.current]).catch((e) => fail('Could not save pinned repositories', e))
+  }
+
+  const peekTerms = (id: number) => tabsRef.current.find((t) => t.id === id)?.be.termList?.().catch(() => []) ?? Promise.resolve([])
+
+  const pickTerm = (id: number, term: string) => {
+    setActive(id)
+    apis.current.get(id)?.showTerm(term)
+    if (!docked) setShown(false)
+  }
+
   const runAll = async (kind: 'pull' | 'fetch') => {
     const list = tabsRef.current.flatMap((t) => {
       const api = apis.current.get(t.id)
@@ -250,12 +265,12 @@ export function Shell() {
 
   const openInfo = (info: RepoInfo, focus = true) => add({ key: info.dir, name: info.name, title: info.dir, be: httpBackend(location.origin, token!, info.dir) }, focus)
 
-  const openPath = async (path: string, focus = true) => {
+  const openPath = async (path: string, focus = true, quiet = false) => {
     try {
       openInfo(await helper!.openRepo(path), focus)
       setRecentRepos((await helper!.repos()).recent)
     } catch (e) {
-      fail('Could not open the repository', e)
+      if (!quiet) fail('Could not open the repository', e)
     }
   }
 
@@ -303,10 +318,22 @@ export function Shell() {
         .repos()
         .then(async ({ current, recent }) => {
           setRecentRepos(recent)
-          const pins = await helper!.pins()
+          const [pins, prefs] = await Promise.all([helper!.pins(), helper!.prefs().catch(() => ({}) as Record<string, unknown>)])
+          if (prefs.theme === 'dark' || prefs.theme === 'light') setTheme(prefs.theme)
+          setScheme(isScheme(prefs.scheme) ? prefs.scheme : undefined)
+          if (isMergeMethod(prefs.mergeMethod)) setMergeMethod(prefs.mergeMethod)
           for (const r of pins) pinnedKeys.current.add(r.dir)
-          if (current) openInfo(current)
-          for (const r of pins) if (r.dir !== current?.dir) await openPath(r.dir, false)
+          // the repositories open when Ramulus last closed come back in their order, with the pinned ones
+          const saved = Array.isArray(prefs.open) ? prefs.open.filter((d): d is string => typeof d === 'string') : []
+          const order = [...new Set([...(current && !saved.includes(current.dir) ? [current.dir] : []), ...saved, ...pins.map((r) => r.dir)])]
+          try {
+            for (const dir of order) {
+              if (dir === current?.dir) openInfo(current)
+              else await openPath(dir, false, true)
+            }
+          } finally {
+            setPrefsReady(true)
+          }
           const { root, inside, repos } = await helper!.findRepos()
           setFound(repos)
           const unopened = repos.filter((r) => !tabsRef.current.some((t) => t.key === r.dir))
@@ -356,6 +383,9 @@ export function Shell() {
         }}
         onClose={close}
         onPin={togglePin}
+        onMove={move}
+        onPeek={peekTerms}
+        onPickTerm={pickTerm}
         onOpen={() => setPicker(true)}
         onDock={toggleDock}
         onMore={(r) =>
@@ -377,6 +407,7 @@ export function Shell() {
           <div key={t.id} class="tab-page" hidden={t.id !== active}>
             <App
               be={t.be}
+              name={t.name}
               active={t.id === active}
               theme={theme}
               onTheme={setTheme}
@@ -417,7 +448,7 @@ export function Shell() {
               <div style={{ display: 'flex', gap: '8px' }}>
                 {helper ? (
                   <button class="primary" onClick={() => setPicker(true)}>
-                    Open repository…
+                    Open a folder…
                   </button>
                 ) : (
                   <>
@@ -432,7 +463,7 @@ export function Shell() {
                   </>
                 )}
               </div>
-              {!helper && !canPick && <p class="note">Opening folders needs the File System Access API, which Chrome, Edge and other Chromium browsers provide. Safari and Firefox can only run the demo.</p>}
+              {!helper && !canPick && <p class="note">Opening folders needs a Chromium browser. Safari and Firefox run the demo only.</p>}
               {(helper ? recentRepos.length : handles.length) > 0 && (
                 <div class="recent">
                   <span class="label">Recent</span>
@@ -451,9 +482,9 @@ export function Shell() {
               )}
               {!helper && (
                 <>
-                  <p class="note">Nothing leaves your machine except avatar lookups on gravatar.com and, when you use them, fetch, pull and push through the CORS proxy you set under Settings.</p>
+                  <p class="note">Only avatar lookups and, when you use them, fetch, pull and push through your CORS proxy leave this machine.</p>
                   <p class="note">
-                    For full speed and your SSH keys, run <code>npx ramulus</code> inside a repository instead.
+                    For full speed and your SSH keys, run <code>npx ramulus</code>.
                   </p>
                 </>
               )}
@@ -468,7 +499,7 @@ export function Shell() {
         )}
       </div>
       {menu && <Menu menu={menu} onClose={() => setMenu(undefined)} />}
-      {picker && <Palette commands={choices} extra={typedPath} placeholder={helper ? 'Type a path, or pick a recent repository' : 'Pick a repository'} onClose={() => setPicker(false)} />}
+      {picker && <Palette commands={choices} extra={typedPath} placeholder={helper ? 'Type a path, or pick a recent project' : 'Pick a repository'} onClose={() => setPicker(false)} />}
       {dialog && (
         <Dialogs
           dialog={dialog}

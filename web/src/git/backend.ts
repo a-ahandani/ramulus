@@ -41,6 +41,14 @@ export interface FileVersions {
 
 export type TermKind = 'agent' | 'shell'
 
+export interface TermTab {
+  id: string
+  kind: TermKind
+  agent?: string
+  /** the title the program gave its terminal, such as Claude Code's name for the conversation */
+  title?: string
+}
+
 export type MergeMethod = 'merge' | 'squash' | 'rebase'
 
 export type PrChange = 'ready' | 'draft' | 'close' | 'reopen'
@@ -104,6 +112,8 @@ export interface PullRequest {
 export interface Backend {
   native: boolean
   load(limit: number): Promise<RepoData>
+  /** starts a repository in a folder that has none */
+  init?(): Promise<void>
   status(): Promise<WorkStatus>
   files(): Promise<string[]>
   prs?(): Promise<PullRequest[]>
@@ -149,7 +159,7 @@ export interface Backend {
   aiContext?(task: 'commit' | 'branch', at?: string): Promise<string>
   aiAsk?(agent: string, prompt: string, signal: AbortSignal): Promise<string>
   termStart?(id: string, kind: TermKind, agent: string | undefined, cols: number, rows: number): Promise<{ agent?: string; fresh: boolean }>
-  termList?(): Promise<{ id: string; kind: TermKind; agent?: string }[]>
+  termList?(): Promise<TermTab[]>
   termInput?(id: string, data: string): Promise<void>
   termResize?(id: string, cols: number, rows: number): Promise<void>
   termStop?(id?: string): Promise<void>

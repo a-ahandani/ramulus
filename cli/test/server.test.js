@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { execFileSync } from 'node:child_process'
-import { mkdtempSync, realpathSync, rmSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, realpathSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { after, before, describe, it } from 'node:test'
@@ -87,5 +87,15 @@ describe('helper server', () => {
     const open = await events(second)
     assert.equal(open.status, 200)
     await open.body.cancel()
+  })
+
+  it('opens a folder without git and starts a repository in it', async () => {
+    const plain = join(root, 'plain')
+    mkdirSync(plain)
+    const opened = (await call('openRepo', { path: plain })).result
+    assert.equal(opened.name, 'plain')
+    assert.match((await call('load', { repo: opened.dir })).error, /not a git repository/)
+    assert.equal((await call('init', { repo: opened.dir })).result, null)
+    assert.deepEqual((await call('status', { repo: opened.dir })).result.unstaged, [])
   })
 })

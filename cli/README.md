@@ -17,6 +17,7 @@ Options: `--port N` to pick a port, `--no-open` to only print the URL. The packa
 - The server listens on 127.0.0.1 only and every request carries a per-run token, so other pages and other machines cannot reach your repository.
 - Commit graph with lanes, branches, tags, stashes, staging with diffs, commit and amend, merge, rebase, cherry-pick, revert, reset, fetch, pull, push, and a banner with Continue and Abort when a merge or rebase stops on conflicts.
 - Open several repositories in a left sidebar that stays docked or auto-hides, pin favourites to the top, search them with ⌘⇧A, and pull or fetch all of them at once.
+- Drag projects to reorder them, open folders without git too, and pick up where you left off: projects, terminal tabs and Claude Code conversations come back when you reopen Ramulus.
 - Rebase with uncommitted changes and undo it afterwards; a rejected push offers rebase, merge or a safe force push.
 - A terminal panel built for Claude Code: Shift+Enter or Option+Enter adds a line to the prompt, pasting an image hands it to Claude Code from the clipboard, and rendering runs on the GPU.
 - Optional help from the AI agent you already use (Claude Code, Codex, Gemini CLI or opencode), with no API key: draft commit messages and branch names, and run the agent's own interactive tool in a terminal panel (⌃\`) to chat with it or have it fix conflicts. Ramulus asks first and sends nothing until you turn it on.

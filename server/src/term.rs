@@ -1,18 +1,26 @@
 use crate::ai::{agent, find_bin};
-use crate::{err, var, Env, Error, Result};
+use crate::{err, home, var, Env, Error, Result};
 use axum::response::sse::Event;
 use futures_core::Stream;
 use portable_pty::{native_pty_system, Child, ChildKiller, CommandBuilder, MasterPty, PtySize};
-use serde::Serialize;
-use std::collections::HashMap;
+use serde::{Deserialize, Serialize};
+use std::collections::{HashMap, HashSet};
 use std::convert::Infallible;
 use std::io::{Read, Write};
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, Weak};
+use std::time::Duration;
 use tokio::sync::broadcast;
 
 pub const KEEP: usize = 200_000;
 const MAX_PER_REPO: usize = 8;
+const TITLE_MAX: usize = 120;
+const SAVE_EVERY: Duration = Duration::from_secs(2);
+/// A helper saving more recently than this still runs, and keeps the saved tabs to itself.
+const OWNER_FRESH: Duration = Duration::from_secs(6);
+/// Printed between a restored tab's old output and the program started again below it; it leaves a full-screen program's screen without moving the cursor.
+const RESTORED: &str = "\x1b[?47l\x1b[!p\r\n\x1b[2m─── new session ───\x1b[0m\r\n";
 
 /// Keeps the newest `keep` bytes, starting at a line so the replay never opens mid-line.
 pub fn trim_tail(buf: &str, keep: usize) -> &str {
@@ -30,6 +38,30 @@ pub fn trim_tail(buf: &str, keep: usize) -> &str {
             &buf[s..]
         }
     }
+}
+
+/// The last complete window title (OSC 0 or 2) in `s`, the way Claude Code names its conversation.
+pub fn last_title(s: &str) -> Option<&str> {
+    let mut last = None;
+    let mut from = 0;
+    while let Some(i) = s[from..].find("\x1b]") {
+        from += i + 2;
+        let body = &s[from..];
+        let Some(text) = body.strip_prefix("0;").or_else(|| body.strip_prefix("2;")) else {
+            continue;
+        };
+        let Some(end) = text.find(['\x07', '\x1b']) else { break };
+        if text[end..].starts_with('\x07') || text[end..].starts_with("\x1b\\") {
+            last = Some(&text[..end]);
+        }
+    }
+    last
+}
+
+fn clean_title(t: &str) -> Option<String> {
+    let t: String = t.chars().filter(|c| !c.is_control()).collect();
+    let t: String = t.trim().chars().take(TITLE_MAX).collect();
+    (!t.is_empty()).then_some(t)
 }
 
 fn size(n: Option<i64>, min: u16, max: u16, fallback: u16) -> u16 {
@@ -54,25 +86,160 @@ enum Msg {
 struct State {
     buf: String,
     exit: Option<Option<u32>>,
+    title: Option<String>,
+    /// the output changed since it was last saved
+    unsaved: bool,
 }
 
+/// A terminal tab. It outlives its program: an ended or restored tab starts again as itself.
 struct Session {
     seq: u64,
     kind: &'static str,
     agent: Option<String>,
+    /// names the saved output, and is Claude Code's session id so the tab resumes its conversation
+    uuid: String,
     state: Mutex<State>,
     tx: broadcast::Sender<Msg>,
     master: Mutex<Option<Box<dyn MasterPty + Send>>>,
-    writer: Mutex<Box<dyn Write + Send>>,
-    killer: Mutex<Box<dyn ChildKiller + Send + Sync>>,
+    writer: Mutex<Option<Box<dyn Write + Send>>>,
+    killer: Mutex<Option<Box<dyn ChildKiller + Send + Sync>>>,
+}
+
+impl Session {
+    fn new(seq: u64, kind: &'static str, agent: Option<String>, uuid: String, buf: String, title: Option<String>, exit: Option<Option<u32>>) -> Session {
+        Session {
+            seq,
+            kind,
+            agent,
+            uuid,
+            state: Mutex::new(State { buf, exit, title, unsaved: true }),
+            tx: broadcast::channel(1024).0,
+            master: Mutex::new(None),
+            writer: Mutex::new(None),
+            killer: Mutex::new(None),
+        }
+    }
+
+    /// Claude Code keeps the conversation itself and prints it again on resume.
+    fn resumes(&self) -> bool {
+        self.agent.as_deref() == Some("claude")
+    }
 }
 
 type Sessions = Arc<Mutex<HashMap<String, Arc<Session>>>>;
 
-#[derive(Default)]
+/// The tabs as saved in index.json, each one's output in <uuid>.log beside it.
+#[derive(Serialize, Deserialize)]
+struct Saved {
+    repo: String,
+    id: String,
+    kind: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    agent: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    title: Option<String>,
+    uuid: String,
+}
+
+struct Store {
+    dir: PathBuf,
+    /// the index as last written, which also keeps two saves from interleaving
+    index: Mutex<String>,
+    closed: std::sync::atomic::AtomicBool,
+}
+
+fn write_atomic(file: &Path, text: &str) -> std::io::Result<()> {
+    let tmp = file.with_extension("tmp");
+    std::fs::write(&tmp, text)?;
+    std::fs::rename(tmp, file)
+}
+
+impl Store {
+    fn save(&self, sessions: &Sessions, output: bool) {
+        let mut last = self.index.lock().unwrap();
+        if self.closed.load(Ordering::SeqCst) {
+            return;
+        }
+        let mut list: Vec<(String, Arc<Session>)> = sessions.lock().unwrap().iter().map(|(k, s)| (k.clone(), s.clone())).collect();
+        list.sort_by_key(|(_, s)| s.seq);
+        let saved: Vec<Saved> = list
+            .iter()
+            .filter_map(|(k, s)| {
+                let (repo, id) = k.rsplit_once('\n')?;
+                Some(Saved {
+                    repo: repo.into(),
+                    id: id.into(),
+                    kind: s.kind.into(),
+                    agent: s.agent.clone(),
+                    title: s.state.lock().unwrap().title.clone(),
+                    uuid: s.uuid.clone(),
+                })
+            })
+            .collect();
+        let text = serde_json::to_string(&saved).unwrap_or_default();
+        let _ = std::fs::create_dir_all(&self.dir);
+        let _ = std::fs::write(self.dir.join("owner"), std::process::id().to_string());
+        if text != *last && write_atomic(&self.dir.join("index.json"), &text).is_ok() {
+            *last = text;
+        }
+        if !output {
+            return;
+        }
+        for (_, s) in list.iter().filter(|(_, s)| !s.resumes()) {
+            let buf = {
+                let mut st = s.state.lock().unwrap();
+                if !st.unsaved {
+                    continue;
+                }
+                st.unsaved = false;
+                st.buf.clone()
+            };
+            let _ = write_atomic(&self.dir.join(format!("{}.log", s.uuid)), &buf);
+        }
+    }
+
+    /// The last save of this run; the next helper takes the tabs over at once.
+    fn close(&self, sessions: &Sessions) {
+        self.save(sessions, true);
+        let _last = self.index.lock().unwrap();
+        self.closed.store(true, Ordering::SeqCst);
+        let _ = std::fs::remove_file(self.dir.join("owner"));
+    }
+
+    fn forget(&self, uuid: &str) {
+        let _ = std::fs::remove_file(self.dir.join(format!("{uuid}.log")));
+    }
+}
+
 pub struct Terminals {
     sessions: Sessions,
     seq: AtomicU64,
+    store: Option<Arc<Store>>,
+}
+
+fn valid_uuid(s: &str) -> bool {
+    s.len() == 36 && s.chars().all(|c| c.is_ascii_hexdigit() || c == '-')
+}
+
+fn new_uuid() -> Result<String> {
+    let mut b = [0u8; 16];
+    getrandom::fill(&mut b).map_err(|e| Error(e.to_string()))?;
+    b[6] = (b[6] & 0x0f) | 0x40;
+    b[8] = (b[8] & 0x3f) | 0x80;
+    let h: String = b.iter().map(|x| format!("{x:02x}")).collect();
+    Ok(format!("{}-{}-{}-{}-{}", &h[..8], &h[8..12], &h[12..16], &h[16..20], &h[20..]))
+}
+
+/// Whether Claude Code saved a conversation under this id, which it does once the first message is sent.
+fn claude_has(env: &Env, uuid: &str) -> bool {
+    let base = var(env, "CLAUDE_CONFIG_DIR")
+        .filter(|v| !v.is_empty())
+        .map(PathBuf::from)
+        .unwrap_or_else(|| home().join(".claude"));
+    let file = format!("{uuid}.jsonl");
+    std::fs::read_dir(base.join("projects"))
+        .map(|dirs| dirs.flatten().any(|d| d.path().join(&file).is_file()))
+        .unwrap_or(false)
 }
 
 #[derive(Serialize, Debug, PartialEq)]
@@ -88,13 +255,15 @@ pub struct Tab {
     pub kind: &'static str,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub agent: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
 }
 
 fn key(repo: &str, id: &str) -> String {
     format!("{repo}\n{id}")
 }
 
-fn command(kind: &str, agent_id: &str, env: &Env) -> Result<(String, Vec<String>)> {
+fn command(kind: &str, agent_id: &str, extra: Vec<String>, env: &Env) -> Result<(String, Vec<String>)> {
     if kind == "shell" {
         return Ok(if cfg!(windows) {
             (var(env, "ComSpec").unwrap_or("cmd.exe").into(), vec![])
@@ -107,9 +276,9 @@ fn command(kind: &str, agent_id: &str, env: &Env) -> Result<(String, Vec<String>
     };
     let bin = bin.to_string_lossy().into_owned();
     Ok(if cfg!(windows) {
-        (var(env, "ComSpec").unwrap_or("cmd.exe").into(), vec!["/d".into(), "/c".into(), bin])
+        (var(env, "ComSpec").unwrap_or("cmd.exe").into(), [vec!["/d".into(), "/c".into(), bin], extra].concat())
     } else {
-        (bin, vec![])
+        (bin, extra)
     })
 }
 
@@ -152,6 +321,15 @@ fn pump(mut reader: Box<dyn Read + Send>, s: &Session) {
         // appending and sending under one lock keeps a replay and the live stream from overlapping
         let mut st = s.state.lock().unwrap();
         st.buf.push_str(&text);
+        st.unsaved = true;
+        // a title can arrive split across reads, so look a little before this one too
+        let mut from = st.buf.len().saturating_sub(text.len() + 256);
+        while !st.buf.is_char_boundary(from) {
+            from += 1;
+        }
+        if let Some(t) = last_title(&st.buf[from..]) {
+            st.title = clean_title(t);
+        }
         let drop_to = st.buf.len() - trim_tail(&st.buf, KEEP).len();
         if drop_to > 0 {
             st.buf.drain(..drop_to);
@@ -161,21 +339,88 @@ fn pump(mut reader: Box<dyn Read + Send>, s: &Session) {
 }
 
 /// Waits for the child, closes the pty so the reader ends (Windows' console pipe stays open until then), and reports the exit.
-fn wait_exit(mut child: Box<dyn Child + Send + Sync>, reader: std::thread::JoinHandle<()>, s: Arc<Session>, k: String, sessions: Sessions) {
+fn wait_exit(mut child: Box<dyn Child + Send + Sync>, reader: std::thread::JoinHandle<()>, s: Arc<Session>) {
     let code = child.wait().ok().map(|st| st.exit_code());
     drop(s.master.lock().unwrap().take());
     let _ = reader.join();
     let mut st = s.state.lock().unwrap();
     st.exit = Some(code);
-    let mut map = sessions.lock().unwrap();
-    if map.get(&k).map(|x| Arc::ptr_eq(x, &s)).unwrap_or(false) {
-        map.remove(&k);
-    }
-    drop(map);
     let _ = s.tx.send(Msg::Exit(code));
 }
 
+/// Saves the tabs every few seconds while the terminals exist, so a crash loses little.
+fn keep_saving(sessions: Weak<Mutex<HashMap<String, Arc<Session>>>>, store: Arc<Store>) {
+    std::thread::spawn(move || loop {
+        std::thread::sleep(SAVE_EVERY);
+        let Some(sessions) = sessions.upgrade().filter(|_| !store.closed.load(Ordering::SeqCst)) else {
+            return;
+        };
+        store.save(&sessions, true);
+    });
+}
+
 impl Terminals {
+    /// Terminals that save their tabs in `dir`, starting with the ones saved by the last run.
+    /// While another helper is saving there, this one keeps its tabs for this run only.
+    pub fn new(dir: Option<PathBuf>) -> Terminals {
+        let in_use = |dir: &Path| {
+            let age = std::fs::metadata(dir.join("owner")).and_then(|m| m.modified()).ok().and_then(|t| t.elapsed().ok());
+            age.is_some_and(|a| a < OWNER_FRESH)
+        };
+        let t = Terminals {
+            sessions: Default::default(),
+            seq: AtomicU64::new(0),
+            store: dir.filter(|d| !in_use(d)).map(|dir| {
+                Arc::new(Store {
+                    dir,
+                    index: Mutex::new(String::new()),
+                    closed: Default::default(),
+                })
+            }),
+        };
+        if let Some(store) = &t.store {
+            let text = std::fs::read_to_string(store.dir.join("index.json")).unwrap_or_default();
+            let saved: Vec<Saved> = serde_json::from_str(&text).unwrap_or_default();
+            let mut map = t.sessions.lock().unwrap();
+            for e in saved {
+                let kind = if e.kind == "shell" { "shell" } else { "agent" };
+                if !valid_uuid(&e.uuid) || !Path::new(&e.repo).is_dir() || map.contains_key(&key(&e.repo, &e.id)) {
+                    continue;
+                }
+                let buf = std::fs::read_to_string(store.dir.join(format!("{}.log", e.uuid))).unwrap_or_default();
+                let s = Session::new(
+                    t.seq.fetch_add(1, Ordering::Relaxed),
+                    kind,
+                    e.agent.filter(|a| agent(a).is_some()),
+                    e.uuid,
+                    trim_tail(&buf, KEEP).to_string(),
+                    e.title.as_deref().and_then(clean_title),
+                    Some(None),
+                );
+                s.state.lock().unwrap().unsaved = false;
+                map.insert(key(&e.repo, &e.id), Arc::new(s));
+            }
+            let kept: HashSet<String> = map.values().map(|s| format!("{}.log", s.uuid)).collect();
+            drop(map);
+            for f in std::fs::read_dir(&store.dir).into_iter().flatten().flatten() {
+                let name = f.file_name().to_string_lossy().into_owned();
+                if name.ends_with(".log") && !kept.contains(&name) {
+                    let _ = std::fs::remove_file(f.path());
+                }
+            }
+            *store.index.lock().unwrap() = text;
+            store.save(&t.sessions, false);
+            keep_saving(Arc::downgrade(&t.sessions), store.clone());
+        }
+        t
+    }
+
+    fn save_index(&self) {
+        if let Some(store) = &self.store {
+            store.save(&self.sessions, false);
+        }
+    }
+
     fn get(&self, repo: &str, id: &str) -> Option<Arc<Session>> {
         self.sessions.lock().unwrap().get(&key(repo, id)).cloned()
     }
@@ -185,7 +430,8 @@ impl Terminals {
         let (c, r) = (size(cols, 20, 500, 80), size(rows, 5, 200, 24));
         let k = key(repo, id);
         let mut sessions = self.sessions.lock().unwrap();
-        if let Some(old) = sessions.get(&k) {
+        let old = sessions.get(&k).cloned();
+        if let Some(old) = old.as_ref().filter(|o| o.state.lock().unwrap().exit.is_none()) {
             // a size nudge makes a full-screen program repaint for the tab that came back
             if let Some(m) = old.master.lock().unwrap().as_ref() {
                 let _ = m.resize(pty(c, r.saturating_sub(1).max(5)));
@@ -197,10 +443,33 @@ impl Terminals {
             });
         }
         let prefix = key(repo, "");
-        if sessions.keys().filter(|x| x.starts_with(&prefix)).count() >= MAX_PER_REPO {
+        if old.is_none() && sessions.keys().filter(|x| x.starts_with(&prefix)).count() >= MAX_PER_REPO {
             return err("Close a terminal tab before opening another");
         }
-        let (file, args) = command(kind, agent_id, env)?;
+        // an ended or restored tab starts again as itself, below what it printed before
+        let s = match &old {
+            Some(o) => {
+                let st = o.state.lock().unwrap();
+                let buf = if o.resumes() || st.buf.is_empty() {
+                    String::new()
+                } else {
+                    format!("{}{RESTORED}", st.buf)
+                };
+                Session::new(o.seq, o.kind, o.agent.clone(), o.uuid.clone(), buf, st.title.clone(), None)
+            }
+            None => {
+                let kind = if kind == "shell" { "shell" } else { "agent" };
+                let agent = (kind != "shell").then(|| agent_id.to_string());
+                Session::new(self.seq.fetch_add(1, Ordering::Relaxed), kind, agent, new_uuid()?, String::new(), None, None)
+            }
+        };
+        let extra = if s.resumes() {
+            let resume = old.is_some() && claude_has(env, &s.uuid);
+            vec![if resume { "--resume" } else { "--session-id" }.to_string(), s.uuid.clone()]
+        } else {
+            vec![]
+        };
+        let (file, args) = command(s.kind, s.agent.as_deref().unwrap_or(""), extra, env)?;
         let pair = native_pty_system()
             .openpty(pty(c, r))
             .map_err(|e| Error(format!("The terminal is not available on this system: {e}")))?;
@@ -216,26 +485,17 @@ impl Terminals {
         let child = pair.slave.spawn_command(cmd).map_err(|e| Error(e.to_string()))?;
         drop(pair.slave);
         let reader = pair.master.try_clone_reader().map_err(|e| Error(e.to_string()))?;
-        let writer = pair.master.take_writer().map_err(|e| Error(e.to_string()))?;
-        let killer = child.clone_killer();
-        let (tx, _) = broadcast::channel(1024);
-        let agent = (kind != "shell").then(|| agent_id.to_string());
-        let s = Arc::new(Session {
-            seq: self.seq.fetch_add(1, Ordering::Relaxed),
-            kind: if kind == "shell" { "shell" } else { "agent" },
-            agent: agent.clone(),
-            state: Mutex::new(State { buf: String::new(), exit: None }),
-            tx,
-            master: Mutex::new(Some(pair.master)),
-            writer: Mutex::new(writer),
-            killer: Mutex::new(killer),
-        });
-        sessions.insert(k.clone(), s.clone());
+        *s.writer.lock().unwrap() = Some(pair.master.take_writer().map_err(|e| Error(e.to_string()))?);
+        *s.killer.lock().unwrap() = Some(child.clone_killer());
+        *s.master.lock().unwrap() = Some(pair.master);
+        let s = Arc::new(s);
+        let agent = s.agent.clone();
+        sessions.insert(k, s.clone());
         drop(sessions);
-        let all = self.sessions.clone();
+        self.save_index();
         let for_reader = s.clone();
         let reading = std::thread::spawn(move || pump(reader, &for_reader));
-        std::thread::spawn(move || wait_exit(child, reading, s, k, all));
+        std::thread::spawn(move || wait_exit(child, reading, s));
         Ok(Started { agent, fresh: true })
     }
 
@@ -254,6 +514,7 @@ impl Terminals {
                         id: k[prefix.len()..].to_string(),
                         kind: s.kind,
                         agent: s.agent.clone(),
+                        title: s.state.lock().unwrap().title.clone(),
                     },
                 )
             })
@@ -305,9 +566,10 @@ impl Terminals {
     pub async fn write(&self, repo: &str, id: &str, data: String) {
         let Some(s) = self.get(repo, id) else { return };
         let _ = tokio::task::spawn_blocking(move || {
-            let mut w = s.writer.lock().unwrap();
-            let _ = w.write_all(data.as_bytes());
-            let _ = w.flush();
+            if let Some(w) = s.writer.lock().unwrap().as_mut() {
+                let _ = w.write_all(data.as_bytes());
+                let _ = w.flush();
+            }
         })
         .await;
     }
@@ -320,10 +582,16 @@ impl Terminals {
         }
     }
 
+    /// Closes a tab for good: its program ends and its saved output goes.
     fn stop_key(&self, k: &str) {
         let s = self.sessions.lock().unwrap().remove(k);
         if let Some(s) = s {
-            let _ = s.killer.lock().unwrap().kill();
+            if let Some(killer) = s.killer.lock().unwrap().as_mut() {
+                let _ = killer.kill();
+            }
+            if let Some(store) = &self.store {
+                store.forget(&s.uuid);
+            }
         }
     }
 
@@ -338,12 +606,19 @@ impl Terminals {
                 }
             }
         }
+        self.save_index();
     }
 
+    /// Saves every tab for the next run, then ends their programs; this is the helper shutting down, not tabs closing.
     pub fn stop_all(&self) {
-        let keys: Vec<String> = self.sessions.lock().unwrap().keys().cloned().collect();
-        for k in keys {
-            self.stop_key(&k);
+        if let Some(store) = &self.store {
+            store.close(&self.sessions);
+        }
+        let all: Vec<Arc<Session>> = self.sessions.lock().unwrap().values().cloned().collect();
+        for s in all {
+            if let Some(killer) = s.killer.lock().unwrap().as_mut() {
+                let _ = killer.kill();
+            }
         }
     }
 }

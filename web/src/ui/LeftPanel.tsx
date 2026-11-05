@@ -198,7 +198,7 @@ export function LeftPanel(p: LeftProps) {
               ))}
             </div>
           ))}
-          {p.data.remote.length === 0 && <div class="empty">Nothing from remotes yet. Fetch to load them.</div>}
+          {p.data.remote.length === 0 && <div class="empty">None yet. Fetch to load them.</div>}
         </div>
       )}
 

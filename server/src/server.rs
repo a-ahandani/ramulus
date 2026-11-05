@@ -55,8 +55,9 @@ pub struct App {
 }
 
 const SHELL_OPS: [&str; 10] = ["repos", "pins", "setPins", "prefs", "setPrefs", "findRepos", "pickFolder", "ai", "setAi", "openRepo"];
-const REPO_OPS: [&str; 47] = [
+const REPO_OPS: [&str; 48] = [
     "load",
+    "init",
     "files",
     "prs",
     "prMerge",
@@ -249,7 +250,7 @@ impl App {
         let app = Arc::new(App {
             known: Mutex::new(cfg.dir.iter().cloned().collect()),
             watchers: Default::default(),
-            terms: Terminals::default(),
+            terms: Terminals::new(Some(cfg.state_file.with_file_name("terms"))),
             cfg,
         });
         if let Some(d) = &app.cfg.dir {
@@ -355,7 +356,12 @@ impl App {
                 if !path.is_dir() {
                     return err("That folder does not exist");
                 }
-                let top = git::toplevel(&path.to_string_lossy()).await?;
+                let path = path.to_string_lossy().into_owned();
+                // a folder without git opens too, for its terminals and to start a repository in it
+                let top = match git::toplevel(&path).await {
+                    Err(e) if e.0.contains("not a git repository") => path,
+                    r => r?,
+                };
                 self.known.lock().unwrap().insert(top.clone());
                 let _ = self.remember(&top);
                 Ok(info(&top))
@@ -368,6 +374,7 @@ impl App {
         let env = &self.cfg.env;
         match name {
             "load" => val(git::load(repo, b.i64("limit").filter(|n| *n >= 0).map(|n| n as usize).unwrap_or(2000)).await?),
+            "init" => git::run(repo, &["init"], None).await.and_then(|_| done()),
             "files" => val(git::files(repo).await?),
             "prs" => Ok(Value::Array(prs::pull_requests(repo, env).await)),
             "prMerge" => prs::merge_pull_request(repo, b.i64("number").unwrap_or(0), &b.string("method"), env)

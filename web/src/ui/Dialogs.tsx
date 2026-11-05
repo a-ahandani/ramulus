@@ -293,7 +293,7 @@ export function Dialogs(p: DialogProps) {
             <a href="https://terminalcolors.com/" target="_blank" rel="noreferrer">
               terminalcolors.com
             </a>{' '}
-            and paste the link of its page here. The whole app, the diff and the agent terminal take its colors.
+            and paste its link.
           </div>
           <input
             ref={first}
@@ -317,19 +317,19 @@ export function Dialogs(p: DialogProps) {
       return (
         <Frame title="The remote has commits you don't have" onClose={p.onClose}>
           <div>
-            {d.branch} on the remote has {n(d.behind)} you don't have yet, and you have {n(d.ahead)} it doesn't. A normal push would drop theirs, so git refused it.
+            {d.branch} is {n(d.behind)} ahead of you on the remote, and you have {n(d.ahead)} it lacks.
           </div>
           <button class="choice" onClick={() => (p.onClose(), d.rebase())}>
             <b>Rebase onto theirs, then push</b>
-            <span>Puts your {n(d.ahead)} on top of theirs. Keeps history straight. Recommended.</span>
+            <span>Your {n(d.ahead)} on top of theirs. Recommended.</span>
           </button>
           <button class="choice" onClick={() => (p.onClose(), d.merge())}>
             <b>Merge theirs, then push</b>
-            <span>Adds a merge commit that joins both sides.</span>
+            <span>A merge commit joins both sides.</span>
           </button>
           <button class="choice danger" onClick={() => (p.onClose(), d.force())}>
             <b>Force push</b>
-            <span>Replaces the remote branch with yours and drops their {n(d.behind)}. Stops if the remote changes again first.</span>
+            <span>Drops their {n(d.behind)}. Stops if the remote moves again.</span>
           </button>
           <div class="buttons">
             <button onClick={p.onClose}>Cancel</button>
