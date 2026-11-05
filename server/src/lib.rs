@@ -2,6 +2,7 @@ pub mod ai;
 pub mod git;
 pub mod prs;
 pub mod server;
+pub mod sessions;
 pub mod term;
 
 use std::collections::HashMap;

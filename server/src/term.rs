@@ -58,7 +58,7 @@ pub fn last_title(s: &str) -> Option<&str> {
     last
 }
 
-fn clean_title(t: &str) -> Option<String> {
+pub fn clean_title(t: &str) -> Option<String> {
     let t: String = t.chars().filter(|c| !c.is_control()).collect();
     let t: String = t.trim().chars().take(TITLE_MAX).collect();
     (!t.is_empty()).then_some(t)
@@ -98,6 +98,10 @@ struct Session {
     agent: Option<String>,
     /// names the saved output, and is Claude Code's session id so the tab resumes its conversation
     uuid: String,
+    /// the conversation another agent goes back to whenever this tab starts
+    resume: Option<String>,
+    /// when its program started, in ms
+    started: i64,
     state: Mutex<State>,
     tx: broadcast::Sender<Msg>,
     master: Mutex<Option<Box<dyn MasterPty + Send>>>,
@@ -112,6 +116,8 @@ impl Session {
             kind,
             agent,
             uuid,
+            resume: None,
+            started: now_ms(),
             state: Mutex::new(State { buf, exit, title, unsaved: true }),
             tx: broadcast::channel(1024).0,
             master: Mutex::new(None),
@@ -120,9 +126,9 @@ impl Session {
         }
     }
 
-    /// Claude Code keeps the conversation itself and prints it again on resume.
+    /// The agent keeps the conversation itself and prints it again on resume.
     fn resumes(&self) -> bool {
-        self.agent.as_deref() == Some("claude")
+        self.agent.as_deref() == Some("claude") || self.resume.is_some()
     }
 }
 
@@ -139,6 +145,8 @@ struct Saved {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     title: Option<String>,
     uuid: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    resume: Option<String>,
 }
 
 struct Store {
@@ -173,6 +181,7 @@ impl Store {
                     agent: s.agent.clone(),
                     title: s.state.lock().unwrap().title.clone(),
                     uuid: s.uuid.clone(),
+                    resume: s.resume.clone(),
                 })
             })
             .collect();
@@ -219,6 +228,35 @@ pub struct Terminals {
 
 fn valid_uuid(s: &str) -> bool {
     s.len() == 36 && s.chars().all(|c| c.is_ascii_hexdigit() || c == '-')
+}
+
+/// A session id goes to the agent as an argument, through cmd.exe on Windows.
+pub fn valid_session_id(s: &str) -> bool {
+    (1..=100).contains(&s.len()) && s.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-')
+}
+
+/// How the other agents go back to a conversation; Claude Code tabs carry theirs as the tab's uuid.
+fn resume_args(agent: &str, id: &str) -> Option<Vec<String>> {
+    match agent {
+        "codex" => Some(vec!["resume".into(), id.into()]),
+        "opencode" => Some(vec!["--session".into(), id.into()]),
+        _ => None,
+    }
+}
+
+/// The agent sessions a folder's tabs hold, by id, and for each other agent with a running new tab, when the first such
+/// tab started: what that agent changed since then is the tab's own, since its id is not known.
+#[derive(Default, Debug)]
+pub struct Held {
+    pub ids: HashSet<String>,
+    pub since: HashMap<String, i64>,
+}
+
+fn now_ms() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as i64)
+        .unwrap_or(0)
 }
 
 fn new_uuid() -> Result<String> {
@@ -388,15 +426,18 @@ impl Terminals {
                     continue;
                 }
                 let buf = std::fs::read_to_string(store.dir.join(format!("{}.log", e.uuid))).unwrap_or_default();
-                let s = Session::new(
+                let agent = e.agent.filter(|a| agent(a).is_some());
+                let resume = e.resume.filter(|r| agent.as_deref().is_some_and(|a| resume_args(a, r).is_some()) && valid_session_id(r));
+                let mut s = Session::new(
                     t.seq.fetch_add(1, Ordering::Relaxed),
                     kind,
-                    e.agent.filter(|a| agent(a).is_some()),
+                    agent,
                     e.uuid,
                     trim_tail(&buf, KEEP).to_string(),
                     e.title.as_deref().and_then(clean_title),
                     Some(None),
                 );
+                s.resume = resume;
                 s.state.lock().unwrap().unsaved = false;
                 map.insert(key(&e.repo, &e.id), Arc::new(s));
             }
@@ -425,8 +466,9 @@ impl Terminals {
         self.sessions.lock().unwrap().get(&key(repo, id)).cloned()
     }
 
+    /// `resume` names an agent conversation for a new tab to go back to instead of starting one.
     #[allow(clippy::too_many_arguments)]
-    pub fn start(&self, repo: &str, id: &str, kind: &str, agent_id: &str, cols: Option<i64>, rows: Option<i64>, env: &Env) -> Result<Started> {
+    pub fn start(&self, repo: &str, id: &str, kind: &str, agent_id: &str, cols: Option<i64>, rows: Option<i64>, resume: Option<&str>, env: &Env) -> Result<Started> {
         let (c, r) = (size(cols, 20, 500, 80), size(rows, 5, 200, 24));
         let k = key(repo, id);
         let mut sessions = self.sessions.lock().unwrap();
@@ -446,8 +488,18 @@ impl Terminals {
         if old.is_none() && sessions.keys().filter(|x| x.starts_with(&prefix)).count() >= MAX_PER_REPO {
             return err("Close a terminal tab before opening another");
         }
+        let claude = kind != "shell" && agent_id == "claude";
+        if let Some(r) = resume.filter(|_| old.is_none()) {
+            if !(if claude {
+                valid_uuid(r)
+            } else {
+                kind != "shell" && resume_args(agent_id, r).is_some() && valid_session_id(r)
+            }) {
+                return err("That conversation cannot be resumed");
+            }
+        }
         // an ended or restored tab starts again as itself, below what it printed before
-        let s = match &old {
+        let mut s = match &old {
             Some(o) => {
                 let st = o.state.lock().unwrap();
                 let buf = if o.resumes() || st.buf.is_empty() {
@@ -455,19 +507,27 @@ impl Terminals {
                 } else {
                     format!("{}{RESTORED}", st.buf)
                 };
-                Session::new(o.seq, o.kind, o.agent.clone(), o.uuid.clone(), buf, st.title.clone(), None)
+                let mut s = Session::new(o.seq, o.kind, o.agent.clone(), o.uuid.clone(), buf, st.title.clone(), None);
+                s.resume = o.resume.clone();
+                s
             }
             None => {
                 let kind = if kind == "shell" { "shell" } else { "agent" };
                 let agent = (kind != "shell").then(|| agent_id.to_string());
-                Session::new(self.seq.fetch_add(1, Ordering::Relaxed), kind, agent, new_uuid()?, String::new(), None, None)
+                let uuid = match resume.filter(|_| claude) {
+                    Some(r) => r.to_string(),
+                    None => new_uuid()?,
+                };
+                Session::new(self.seq.fetch_add(1, Ordering::Relaxed), kind, agent, uuid, String::new(), None, None)
             }
         };
-        let extra = if s.resumes() {
-            let resume = old.is_some() && claude_has(env, &s.uuid);
-            vec![if resume { "--resume" } else { "--session-id" }.to_string(), s.uuid.clone()]
-        } else {
-            vec![]
+        if old.is_none() && !claude {
+            s.resume = resume.map(String::from);
+        }
+        let extra = match (s.agent.as_deref(), &s.resume) {
+            (Some("claude"), _) => vec![if claude_has(env, &s.uuid) { "--resume" } else { "--session-id" }.to_string(), s.uuid.clone()],
+            (Some(a), Some(r)) => resume_args(a, r).unwrap_or_default(),
+            _ => vec![],
         };
         let (file, args) = command(s.kind, s.agent.as_deref().unwrap_or(""), extra, env)?;
         let pair = native_pty_system()
@@ -524,6 +584,32 @@ impl Terminals {
     }
 
     /// The terminal's output as server-sent events: a replay of what it printed, then live data, then `exit`.
+    /// The agent sessions this folder's tabs hold: Claude Code tabs by id, resumed tabs by what they resumed, and for
+    /// the other agents, whatever changed since a running new tab of theirs started, since that tab's id is not known.
+    pub fn held(&self, repo: &str) -> Held {
+        let prefix = key(repo, "");
+        let mut held = Held::default();
+        for (k, s) in self.sessions.lock().unwrap().iter() {
+            if !k.starts_with(&prefix) {
+                continue;
+            }
+            match (s.agent.as_deref(), &s.resume) {
+                (Some("claude"), _) => {
+                    held.ids.insert(s.uuid.clone());
+                }
+                (_, Some(r)) => {
+                    held.ids.insert(r.clone());
+                }
+                (Some(a), None) if s.state.lock().unwrap().exit.is_none() => {
+                    let at = held.since.entry(a.to_string()).or_insert(s.started);
+                    *at = (*at).min(s.started);
+                }
+                _ => {}
+            }
+        }
+        held
+    }
+
     pub fn attach(&self, repo: &str, id: &str) -> impl Stream<Item = std::result::Result<Event, Infallible>> {
         let session = self.get(repo, id);
         let data = |d: &str| Event::default().data(serde_json::to_string(d).unwrap_or_default());

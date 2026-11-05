@@ -47,6 +47,17 @@ export interface TermTab {
   agent?: string
   /** the title the program gave its terminal, such as Claude Code's name for the conversation */
   title?: string
+  /** the agent conversation a new tab goes back to instead of starting one */
+  resume?: string
+}
+
+/** An agent conversation held in the repository's folder that no tab has open. */
+export interface AgentSession {
+  agent: string
+  id: string
+  title: string
+  /** when it last changed, in ms */
+  time: number
 }
 
 export type MergeMethod = 'merge' | 'squash' | 'rebase'
@@ -172,7 +183,8 @@ export interface Backend {
   setAi?(settings: AiSettings): Promise<void>
   aiContext?(task: 'commit' | 'branch', at?: string): Promise<string>
   aiAsk?(agent: string, prompt: string, signal: AbortSignal): Promise<string>
-  termStart?(id: string, kind: TermKind, agent: string | undefined, cols: number, rows: number): Promise<{ agent?: string; fresh: boolean }>
+  termStart?(id: string, kind: TermKind, agent: string | undefined, cols: number, rows: number, resume?: string): Promise<{ agent?: string; fresh: boolean }>
+  agentSessions?(): Promise<AgentSession[]>
   termList?(): Promise<TermTab[]>
   termInput?(id: string, data: string): Promise<void>
   termResize?(id: string, cols: number, rows: number): Promise<void>

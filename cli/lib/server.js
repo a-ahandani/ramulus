@@ -6,6 +6,7 @@ import { basename, dirname, extname, join, normalize, resolve } from 'node:path'
 import * as ai from './ai.js'
 import * as git from './git.js'
 import { changePullRequest, ciRuns, mergePullRequest, prConversation, pullRequest, pullRequests } from './prs.js'
+import { agentSessions } from './sessions.js'
 import { createTerminals } from './term.js'
 
 const TYPES = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript', '.css': 'text/css', '.svg': 'image/svg+xml', '.png': 'image/png', '.json': 'application/json' }
@@ -129,9 +130,10 @@ export function createServer({ dir, root = dir, uiDir, token, stateFile = STATE 
     termStart: async (repo, b) => {
       const kind = b.kind === 'shell' ? 'shell' : 'agent'
       if (kind === 'agent') await needAi()
-      return terms.start(repo, termId(b.id), kind, String(b.agent ?? ''), b.cols, b.rows)
+      return terms.start(repo, termId(b.id), kind, String(b.agent ?? ''), b.cols, b.rows, process.env, b.resume ? String(b.resume) : undefined)
     },
     termList: (repo) => terms.list(repo),
+    agentSessions: (repo) => agentSessions(repo, terms.held(repo)),
     termInput: (repo, b) => terms.write(repo, termId(b.id), b.data),
     termResize: (repo, b) => terms.resize(repo, termId(b.id), b.cols, b.rows),
     termStop: (repo, b) => terms.stop(repo, b.all ? undefined : termId(b.id)),

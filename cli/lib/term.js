@@ -29,13 +29,18 @@ export function lastTitle(s) {
   return last
 }
 
-const cleanTitle = (t) => [...t.replace(/[\x00-\x1f\x7f-\x9f]/g, '').trim()].slice(0, TITLE_MAX).join('') || undefined
+export const cleanTitle = (t) => [...t.replace(/[\x00-\x1f\x7f-\x9f]/g, '').trim()].slice(0, TITLE_MAX).join('') || undefined
 
 const size = (n, min, max, fallback) => (Number.isInteger(n) ? Math.min(max, Math.max(min, n)) : fallback)
 
 const MAX_PER_REPO = 8
 
 const validUuid = (s) => typeof s === 'string' && /^[0-9a-f-]{36}$/i.test(s)
+
+// a session id goes to the agent as an argument, through cmd.exe on Windows
+export const SESSION_ID = /^[A-Za-z0-9_-]{1,100}$/
+// how the other agents go back to a conversation; Claude Code tabs carry theirs as the tab's uuid
+const RESUME = { codex: (id) => ['resume', id], opencode: (id) => ['--session', id] }
 
 const writeAtomic = (file, text) => {
   writeFileSync(`${file}.tmp`, text)
@@ -60,8 +65,8 @@ export function createTerminals(dir) {
   const send = (s, event, data) => {
     for (const res of s.clients) res.write(`${event ? `event: ${event}\n` : ''}data: ${JSON.stringify(data)}\n\n`)
   }
-  // Claude Code keeps the conversation itself and prints it again on resume.
-  const resumes = (s) => s.agent === 'claude'
+  // The agent keeps the conversation itself and prints it again on resume.
+  const resumes = (s) => s.agent === 'claude' || !!s.resume
   const session = (fields) => ({ proc: null, buf: '', exit: null, title: undefined, unsaved: true, clients: new Set(), ...fields })
 
   const inUse = () => {
@@ -78,7 +83,7 @@ export function createTerminals(dir) {
     const list = [...sessions].sort(([, a], [, b]) => a.seq - b.seq)
     const saved = list.map(([k, s]) => {
       const at = k.lastIndexOf('\n')
-      return { repo: k.slice(0, at), id: k.slice(at + 1), kind: s.kind, agent: s.agent, title: s.title, uuid: s.uuid }
+      return { repo: k.slice(0, at), id: k.slice(at + 1), kind: s.kind, agent: s.agent, title: s.title, uuid: s.uuid, resume: s.resume }
     })
     const text = JSON.stringify(saved)
     try {
@@ -115,7 +120,8 @@ export function createTerminals(dir) {
       } catch {}
       const agent = AGENTS.some((a) => a.id === e.agent) ? e.agent : undefined
       const title = typeof e.title === 'string' ? cleanTitle(e.title) : undefined
-      sessions.set(key(e.repo, e.id), session({ seq: seq++, kind: e.kind === 'shell' ? 'shell' : 'agent', agent, uuid: e.uuid, buf: trimTail(buf, KEEP), title, exit: { code: null }, unsaved: false }))
+      const resume = RESUME[agent] && SESSION_ID.test(e.resume ?? '') ? e.resume : undefined
+      sessions.set(key(e.repo, e.id), session({ seq: seq++, kind: e.kind === 'shell' ? 'shell' : 'agent', agent, uuid: e.uuid, resume, buf: trimTail(buf, KEEP), title, exit: { code: null }, unsaved: false }))
     }
     const kept = new Set([...sessions.values()].map((s) => `${s.uuid}.log`))
     try {
@@ -143,7 +149,8 @@ export function createTerminals(dir) {
   }
 
   return {
-    async start(repo, id, kind, agentId, cols, rows, env = process.env) {
+    /** `resume` names an agent conversation for a new tab to go back to instead of starting one. */
+    async start(repo, id, kind, agentId, cols, rows, env = process.env, resume) {
       const c = size(cols, 20, 500, 80)
       const r = size(rows, 5, 200, 24)
       const k = key(repo, id)
@@ -154,16 +161,19 @@ export function createTerminals(dir) {
         return { agent: old.agent, fresh: false }
       }
       if (!old && [...sessions.keys()].filter((x) => x.startsWith(`${repo}\n`)).length >= MAX_PER_REPO) throw new Error('Close a terminal tab before opening another')
+      const claude = kind !== 'shell' && agentId === 'claude'
+      if (!old && resume !== undefined && !(claude ? validUuid(resume) : RESUME[agentId] && kind !== 'shell' && SESSION_ID.test(resume))) throw new Error('That conversation cannot be resumed')
       // an ended or restored tab starts again as itself, below what it printed before
       const s = old
-        ? session({ seq: old.seq, kind: old.kind, agent: old.agent, uuid: old.uuid, title: old.title, buf: resumes(old) || !old.buf ? '' : old.buf + RESTORED })
-        : session({ seq: seq++, kind: kind === 'shell' ? 'shell' : 'agent', agent: kind === 'shell' ? undefined : agentId, uuid: randomUUID() })
-      const extra = resumes(s) ? [old && claudeHas(env, s.uuid) ? '--resume' : '--session-id', s.uuid] : []
+        ? session({ seq: old.seq, kind: old.kind, agent: old.agent, uuid: old.uuid, resume: old.resume, title: old.title, buf: resumes(old) || !old.buf ? '' : old.buf + RESTORED })
+        : session({ seq: seq++, kind: kind === 'shell' ? 'shell' : 'agent', agent: kind === 'shell' ? undefined : agentId, uuid: claude && resume ? resume : randomUUID(), resume: claude ? undefined : resume })
+      const extra = s.agent === 'claude' ? [claudeHas(env, s.uuid) ? '--resume' : '--session-id', s.uuid] : s.resume ? RESUME[s.agent](s.resume) : []
       const [file, args] = command(s.kind, s.agent, extra, env)
       const pty = await loadPty()
       if (!pty) throw new Error('The terminal is not available on this system')
       const proc = pty.spawn(file, args, { name: 'xterm-256color', cols: c, rows: r, cwd: repo, env: { ...env, TERM: 'xterm-256color', COLORTERM: 'truecolor' } })
       s.proc = proc
+      s.started = Date.now()
       sessions.set(k, s)
       save(false)
       proc.onData((d) => {
@@ -186,6 +196,21 @@ export function createTerminals(dir) {
         .filter(([k]) => k.startsWith(prefix))
         .sort(([, a], [, b]) => a.seq - b.seq)
         .map(([k, s]) => ({ id: k.slice(prefix.length), kind: s.kind, agent: s.agent, title: s.title }))
+    },
+    /**
+     * The agent sessions this folder's tabs hold: Claude Code tabs by id, resumed tabs by what they resumed, and for
+     * the other agents, whatever changed since a running new tab of theirs started, since that tab's id is not known.
+     */
+    held(repo) {
+      const ids = new Set()
+      const since = new Map()
+      for (const [k, s] of sessions) {
+        if (!k.startsWith(key(repo, ''))) continue
+        if (s.agent === 'claude') ids.add(s.uuid)
+        else if (s.resume) ids.add(s.resume)
+        else if (s.agent && s.proc && !s.exit) since.set(s.agent, Math.min(since.get(s.agent) ?? Infinity, s.started))
+      }
+      return { ids, since }
     },
     attach(repo, id, res) {
       const s = sessions.get(key(repo, id))

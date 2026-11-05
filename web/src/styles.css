@@ -2444,6 +2444,46 @@ button.sb-empty.open {
   flex: 1;
 }
 
+.past {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 6px 8px;
+}
+
+.past-row {
+  justify-content: flex-start;
+  gap: 8px;
+  width: 100%;
+  height: 28px;
+  border-radius: 4px;
+  background: transparent;
+  text-align: left;
+}
+
+.past-row .codicon {
+  flex: none;
+  color: var(--fg-2);
+}
+
+.past-title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.past-meta {
+  flex: none;
+  margin-left: auto;
+  color: var(--fg-2);
+  font-size: 11px;
+}
+
+.past-empty {
+  padding: 8px;
+  color: var(--fg-2);
+}
+
 .agent-term {
   flex: 1;
   min-height: 0;

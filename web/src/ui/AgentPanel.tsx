@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from 'preact/hooks'
 import { DEFAULT_PROMPTS, fillPrompt } from '../git/ai'
-import type { AiSettings, Backend, TermKind, TermTab } from '../git/backend'
+import type { AgentSession, AiSettings, Backend, TermKind, TermTab } from '../git/backend'
 import { AgentTerminal } from './Ai'
-import { Icon, clamp, finished, stored, termTitle } from './bits'
+import { Icon, ago, clamp, finished, stored, termTitle } from './bits'
 import type { MenuState } from './Menu'
 import { Splitter } from './Splitter'
 
@@ -31,6 +31,9 @@ export function useAgentPanel(p: {
   const [paste, setPaste] = useState<{ id: number; text: string; tab: string }>()
   const [restart, setRestart] = useState({ tab: '', n: 0 })
   const [waiting, setWaiting] = useState<Set<string>>(new Set())
+  /** the folder's agent conversations that no tab has open, and whether the History tab is the one showing */
+  const [past, setPast] = useState<AgentSession[]>([])
+  const [history, setHistory] = useState(false)
   const termsRef = useRef(terms)
   termsRef.current = terms
 
@@ -58,16 +61,38 @@ export function useAgentPanel(p: {
   // Only explicit opens take the keyboard, not the remount that comes with switching repositories.
   const show = (id: string) => {
     setTermActive(id)
+    setHistory(false)
     setShown(true)
     setFocus(true)
   }
 
-  const add = (kind: TermKind, agent?: string) => {
-    const t = { id: `${PAGE_TAG}-${++termSeq.current}`, kind, agent }
+  const add = (kind: TermKind, agent?: string, resume?: string) => {
+    const t = { id: `${PAGE_TAG}-${++termSeq.current}`, kind, agent, resume }
     setTerms((ts) => [...ts, t])
     show(t.id)
     return t
   }
+
+  // Looked up when the folder opens and whenever a tab opens or closes, since closing one is what makes its conversation resumable.
+  const canResume = !!p.be.agentSessions && p.agents.length > 0
+  const refresh = () => {
+    if (!canResume) return setPast([])
+    // a tab just opened to resume one may not have reached the helper yet
+    p.be.agentSessions!().then((list) => setPast(list.filter((s) => !termsRef.current.some((t) => t.resume === s.id))), () => {})
+  }
+  useEffect(refresh, [canResume, terms.length])
+
+  const openHistory = () => {
+    setHistory(true)
+    setShown(true)
+    refresh()
+  }
+
+  const resume = (s: AgentSession) => {
+    setPast((ps) => ps.filter((x) => x !== s))
+    add('agent', s.agent, s.id)
+  }
+  const agentName = (id: string) => p.agents.find((a) => a.id === id)?.name ?? id
 
   const openAgent = async (conflictFile?: string) => {
     const picked = await p.pickAgent().catch((e) => void p.say(e))
@@ -80,6 +105,7 @@ export function useAgentPanel(p: {
   const toggle = async () => {
     if (shown) return setShown(false)
     if (activeTerm) return show(activeTerm.id)
+    if (past.length) return openHistory()
     if (!p.be.termStart || !p.be.ai) return p.say('Run npx ramulus in a repository to use your AI agent here')
     const info = await p.be.ai().catch(() => undefined)
     if (info && (info.settings.enabled === false || info.agents.length === 0)) return p.openAiSettings()
@@ -93,7 +119,7 @@ export function useAgentPanel(p: {
     unwait([id])
     if (activeTerm?.id === id) setTermActive(rest[rest.length - 1]?.id)
     if (paste?.tab === id) setPaste(undefined)
-    if (rest.length === 0) {
+    if (rest.length === 0 && !history) {
       setShown(false)
       setMax(false)
     }
@@ -105,6 +131,7 @@ export function useAgentPanel(p: {
     setTerms([])
     setWaiting(new Set())
     setTermActive(undefined)
+    setHistory(false)
     setShown(false)
     setMax(false)
   }
@@ -151,7 +178,7 @@ export function useAgentPanel(p: {
     return () => clearInterval(timer)
   }, [watching, terms.length])
 
-  const view = activeTerm && shown && p.active && (
+  const view = (history || activeTerm) && shown && p.active && (
     <div class="agent-drawer" style={max ? undefined : { height: `${height}px` }}>
       {!max && <Splitter horizontal onDrag={(dy) => setHeight((h) => clamp(h - dy, 120, innerHeight - 200))} />}
       <div class="drawer-head">
@@ -161,8 +188,8 @@ export function useAgentPanel(p: {
               key={t.id}
               role="tab"
               tabIndex={0}
-              aria-selected={t.id === activeTerm.id}
-              class={`term-tab ${t.id === activeTerm.id ? 'active' : ''} ${termRunning[t.id] === false ? 'stopped' : ''} ${termTitle(t).busy ? 'busy' : ''} ${waiting.has(t.id) ? 'waiting' : ''}`}
+              aria-selected={!history && t.id === activeTerm?.id}
+              class={`term-tab ${!history && t.id === activeTerm?.id ? 'active' : ''} ${termRunning[t.id] === false ? 'stopped' : ''} ${termTitle(t).busy ? 'busy' : ''} ${waiting.has(t.id) ? 'waiting' : ''}`}
               title={termRunning[t.id] === false ? `${label(t)} (stopped)` : waiting.has(t.id) ? `${label(t)} (finished)` : label(t)}
               onClick={() => show(t.id)}
               onKeyDown={(e) => (e.key === 'Enter' || e.key === ' ') && show(t.id)}
@@ -182,14 +209,30 @@ export function useAgentPanel(p: {
               </button>
             </div>
           ))}
+          {(past.length > 0 || history) && (
+            <div
+              role="tab"
+              tabIndex={0}
+              aria-selected={history}
+              class={`term-tab ${history ? 'active' : ''}`}
+              title="Agent conversations in this folder that no tab has open"
+              onClick={openHistory}
+              onKeyDown={(e) => (e.key === 'Enter' || e.key === ' ') && openHistory()}
+            >
+              <Icon name="history" />
+              <span class="label">History</span>
+            </div>
+          )}
           <button class="icon" title="New agent or terminal tab" aria-label="New agent or terminal tab" onClick={newTermMenu}>
             <Icon name="add" />
           </button>
         </div>
         <span class="spacer" />
-        <button class="icon" title={`Restart this ${activeTerm.kind === 'shell' ? 'terminal' : 'agent'}`} aria-label="Restart this tab" onClick={() => setRestart((r) => ({ tab: activeTerm.id, n: r.n + 1 }))}>
-          <Icon name="debug-restart" />
-        </button>
+        {!history && activeTerm && (
+          <button class="icon" title={`Restart this ${activeTerm.kind === 'shell' ? 'terminal' : 'agent'}`} aria-label="Restart this tab" onClick={() => setRestart((r) => ({ tab: activeTerm.id, n: r.n + 1 }))}>
+            <Icon name="debug-restart" />
+          </button>
+        )}
         <button class="icon" title="AI agent settings" aria-label="AI agent settings" onClick={p.openAiSettings}>
           <Icon name="settings-gear" />
         </button>
@@ -200,12 +243,30 @@ export function useAgentPanel(p: {
           <Icon name="chevron-down" />
         </button>
       </div>
+      {history || !activeTerm ? (
+        <div class="past" role="tabpanel" aria-label="Agent conversations to resume">
+          {past.length ? (
+            past.map((s) => (
+              <button key={`${s.agent} ${s.id}`} class="past-row" title={`Resume this ${agentName(s.agent)} conversation in a new tab`} onClick={() => resume(s)}>
+                <Icon name="sparkle" />
+                <span class="past-title">{s.title}</span>
+                <span class="past-meta">
+                  {agentName(s.agent)} · {ago(Math.floor(s.time / 1000))}
+                </span>
+              </button>
+            ))
+          ) : (
+            <div class="past-empty">No other agent conversations in this folder.</div>
+          )}
+        </div>
+      ) : (
       <AgentTerminal
         key={activeTerm.id}
         be={p.be}
         id={activeTerm.id}
         kind={activeTerm.kind}
         agent={activeTerm.agent}
+        resume={activeTerm.resume}
         look={p.look}
         focus={focus}
         onFocused={() => setFocus(false)}
@@ -214,10 +275,11 @@ export function useAgentPanel(p: {
         onState={(st) => setTermRunning((m) => ({ ...m, [activeTerm.id]: st.running }))}
         onPasted={() => setPaste(undefined)}
       />
+      )}
     </div>
   )
 
-  const open = terms.length > 0 && shown
+  const open = (terms.length > 0 || history) && shown
   return {
     list: terms,
     shown,
