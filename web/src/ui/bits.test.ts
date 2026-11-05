@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { ago, prsByBranch, settleLimited, webUrl } from './bits'
+import { ago, prsByBranch, settleLimited, termTitle, webUrl } from './bits'
 
 describe('settleLimited', () => {
   it('never runs more than the limit at once and keeps results in order', async () => {
@@ -45,5 +45,15 @@ describe('webUrl', () => {
     expect(webUrl('https://github.com/o/r/actions/runs/1')).toBe('https://github.com/o/r/actions/runs/1')
     expect(webUrl('HTTP://ci.example/log')).toBe('HTTP://ci.example/log')
     for (const bad of ['javascript:alert(1)', ' javascript:alert(1)', 'data:text/html,<script>', 'vbscript:x', '//evil.example', '']) expect(webUrl(bad)).toBeUndefined()
+  })
+})
+
+describe('termTitle', () => {
+  it('shows the topic Claude Code gives its terminal and whether it is working', () => {
+    expect(termTitle({ id: 'a', kind: 'agent', agent: 'claude', title: '\u2733 Fix the login' })).toEqual({ label: 'Fix the login', busy: false })
+    expect(termTitle({ id: 'a', kind: 'agent', agent: 'claude', title: '\u25d0 Fix the login' })).toEqual({ label: 'Fix the login', busy: true })
+    expect(termTitle({ id: 'a', kind: 'agent', agent: 'claude' })).toEqual({ label: 'Claude Code', busy: false })
+    expect(termTitle({ id: 's', kind: 'shell', title: '~ dir' })).toEqual({ label: '~ dir', busy: false })
+    expect(termTitle({ id: 's', kind: 'shell' })).toEqual({ label: 'Terminal', busy: false })
   })
 })

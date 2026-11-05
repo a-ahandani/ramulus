@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'preact/hooks'
-import type { PullRequest } from '../git/backend'
+import type { PullRequest, TermTab } from '../git/backend'
 
 export const LANES = 10
 
@@ -32,6 +32,16 @@ export async function settleLimited<T>(tasks: (() => Promise<T>)[], limit: numbe
   }
   await Promise.all(Array.from({ length: Math.min(limit, tasks.length) }, worker))
   return results
+}
+
+const AGENT_NAMES: Record<string, string> = { claude: 'Claude Code', codex: 'Codex', gemini: 'Gemini CLI', opencode: 'opencode' }
+
+/** A terminal tab's label. Claude Code titles its terminal "✳ topic" when idle and puts a spinner glyph before the topic while it works. */
+export function termTitle(t: TermTab): { label: string; busy: boolean } {
+  const name = t.kind === 'shell' ? 'Terminal' : (AGENT_NAMES[t.agent ?? ''] ?? t.agent ?? 'Agent')
+  const m = t.agent === 'claude' && t.title ? /^(\S)\s+(.+)$/u.exec(t.title) : null
+  if (m && !/[\p{L}\p{N}]/u.test(m[1])) return { label: m[2], busy: m[1] !== '\u2733' }
+  return { label: t.title || name, busy: false }
 }
 
 export const webUrl = (url: string) => (/^https?:\/\//i.test(url) ? url : undefined)

@@ -1,6 +1,7 @@
 import type { JSX } from 'preact'
 import { useEffect, useRef, useState } from 'preact/hooks'
-import { Icon } from './bits'
+import type { TermTab } from '../git/backend'
+import { Icon, termTitle } from './bits'
 import { fuzzyScore } from './Palette'
 
 export interface RepoSummary {
@@ -9,6 +10,8 @@ export interface RepoSummary {
   ahead: number
   behind: number
   busy: boolean
+  /** a folder without git */
+  noGit?: boolean
 }
 
 export interface SideTab {
@@ -53,6 +56,9 @@ export function Sidebar(p: {
   onActivate: (id: number) => void
   onClose: (id: number) => void
   onPin: (id: number) => void
+  onMove: (id: number, target: number, after: boolean) => void
+  onPeek: (id: number) => Promise<TermTab[]>
+  onPickTerm: (id: number, term: string) => void
   onOpen: () => void
   onMore: (at: DOMRect) => void
   onDock: () => void
@@ -65,6 +71,69 @@ export function Sidebar(p: {
   const input = useRef<HTMLInputElement>(null)
   const list = useRef<HTMLDivElement>(null)
   const q = query.trim()
+  const [drag, setDrag] = useState<{ id: number; over?: number; after: boolean }>()
+  const dragged = useRef(false)
+  const [peek, setPeek] = useState<{ id: number; top: number; left: number; terms: TermTab[] }>()
+  const peekTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
+  const hovered = useRef<number | undefined>(undefined)
+  useEffect(() => () => clearTimeout(peekTimer.current), [])
+
+  // resting on a repository shows its agent and terminal tabs, fresh from the helper
+  const hoverTab = (t: SideTab, el: HTMLElement) => {
+    hovered.current = t.id
+    clearTimeout(peekTimer.current)
+    if (peek?.id === t.id || drag) return
+    peekTimer.current = setTimeout(async () => {
+      const terms = await p.onPeek(t.id)
+      if (hovered.current !== t.id) return
+      const r = el.getBoundingClientRect()
+      setPeek(terms.length ? { id: t.id, top: r.top, left: r.right + 6, terms } : undefined)
+    }, 350)
+  }
+  const leaveTab = () => {
+    hovered.current = undefined
+    clearTimeout(peekTimer.current)
+    peekTimer.current = setTimeout(() => setPeek(undefined), 200)
+  }
+
+  // a repository dragged by the pointer, so it works in the desktop window too; it stays among the pinned or the open ones
+  const startDrag = (t: SideTab, e: PointerEvent) => {
+    if (e.button !== 0 || q) return
+    const y0 = e.clientY
+    let last: { id: number; over?: number; after: boolean } | undefined
+    const move = (ev: PointerEvent) => {
+      if (!last && Math.abs(ev.clientY - y0) < 5) return
+      const el = document.elementFromPoint(ev.clientX, ev.clientY)?.closest<HTMLElement>('.sb-item[data-tab]')
+      const target = p.tabs.find((x) => x.id === Number(el?.dataset.tab))
+      const r = el?.getBoundingClientRect()
+      last = { id: t.id, over: target && target.pinned === t.pinned && target.id !== t.id ? target.id : undefined, after: !!r && ev.clientY > r.top + r.height / 2 }
+      if (!document.body.classList.contains('dragging')) {
+        document.body.classList.add('dragging')
+        setPeek(undefined)
+      }
+      setDrag(last)
+    }
+    const end = (drop: boolean) => {
+      removeEventListener('pointermove', move)
+      removeEventListener('pointerup', up)
+      removeEventListener('pointercancel', cancel)
+      removeEventListener('keydown', esc)
+      document.body.classList.remove('dragging')
+      setDrag(undefined)
+      if (!last) return
+      // the click that ends a drag must not also switch repositories
+      dragged.current = true
+      setTimeout(() => (dragged.current = false))
+      if (drop && last.over !== undefined) p.onMove(last.id, last.over, last.after)
+    }
+    const up = () => end(true)
+    const cancel = () => end(false)
+    const esc = (ev: KeyboardEvent) => ev.key === 'Escape' && end(false)
+    addEventListener('pointermove', move)
+    addEventListener('pointerup', up)
+    addEventListener('pointercancel', cancel)
+    addEventListener('keydown', esc)
+  }
 
   useEffect(() => {
     if (!p.focusSearch) return
@@ -94,6 +163,8 @@ export function Sidebar(p: {
 
   const pick = (row: Row | undefined) => {
     if (!row) return
+    clearTimeout(peekTimer.current)
+    setPeek(undefined)
     if (row.kind === 'tab') p.onActivate(row.tab.id)
     else row.recent.open()
     setQuery('')
@@ -116,18 +187,23 @@ export function Sidebar(p: {
   }
 
   const shared = new Set(p.tabs.filter((t, i) => p.tabs.findIndex((x) => x.name === t.name) !== i).map((t) => t.name))
+  const dropCls = (t: SideTab) => (drag?.id === t.id ? 'lifted' : drag?.over === t.id ? (drag.after ? 'drop-after' : 'drop-before') : '')
   const tabRow = (t: SideTab, index: number) => (
     <div
       key={t.id}
-      class={`sb-item ${t.id === p.active ? 'active' : ''} ${q && index === 0 ? 'cursor' : ''} ${t.dirty ? 'dirty' : ''}`}
-      title={t.title}
+      data-tab={t.id}
+      class={`sb-item ${t.id === p.active ? 'active' : ''} ${q && index === 0 ? 'cursor' : ''} ${t.dirty ? 'dirty' : ''} ${dropCls(t)}`}
+      title={peek?.id === t.id ? undefined : t.title}
       onMouseDown={(e) => {
         if (e.button !== 1) return
         e.preventDefault()
         p.onClose(t.id)
       }}
+      onPointerDown={(e) => startDrag(t, e)}
+      onMouseEnter={(e) => hoverTab(t, e.currentTarget)}
+      onMouseLeave={leaveTab}
     >
-      <button class="sb-main" aria-current={t.id === p.active ? 'true' : undefined} onClick={() => pick({ kind: 'tab', tab: t })}>
+      <button class="sb-main" aria-current={t.id === p.active ? 'true' : undefined} onClick={() => !dragged.current && pick({ kind: 'tab', tab: t })}>
         <span class="text">
           <span class="name">
             {highlight(t.name, q)}
@@ -136,11 +212,18 @@ export function Sidebar(p: {
             </span>
           </span>
           <span class="where">
-            {t.summary?.branch && (
+            {t.summary?.noGit ? (
               <>
-                <Icon name="git-branch" />
-                {t.summary.branch}
+                <Icon name="folder" />
+                No git
               </>
+            ) : (
+              t.summary?.branch && (
+                <>
+                  <Icon name="git-branch" />
+                  {t.summary.branch}
+                </>
+              )
             )}
             {shared.has(t.name) && ` · ${folderOf(t.title)}`}
           </span>
@@ -172,7 +255,7 @@ export function Sidebar(p: {
   return (
     <aside
       class={`sidebar ${p.docked ? 'docked' : 'floating'} ${p.shown ? 'shown' : ''}`}
-      aria-label="Repositories"
+      aria-label="Projects"
       onMouseEnter={p.onEnter}
       onMouseLeave={p.onLeave}
       onFocusOut={(e) => {
@@ -180,8 +263,8 @@ export function Sidebar(p: {
       }}
     >
       <div class="sb-head">
-        <span class="title">Repositories</span>
-        <button class="icon" title="Open a repository" aria-label="Open a repository" onClick={p.onOpen}>
+        <span class="title">Projects</span>
+        <button class="icon" title="Open a folder" aria-label="Open a folder" onClick={p.onOpen}>
           <Icon name="add" />
         </button>
         {p.tabs.length > 0 && (
@@ -203,9 +286,9 @@ export function Sidebar(p: {
         <Icon name="search" />
         <input
           ref={input}
-          placeholder="Search repositories (⌘⇧A)"
+          placeholder="Search (⌘⇧A)"
           value={query}
-          aria-label="Search repositories"
+          aria-label="Search projects"
           onInput={(e) => setQuery((e.target as HTMLInputElement).value)}
           onKeyDown={(e) => {
             if (e.key === 'ArrowDown') {
@@ -239,14 +322,42 @@ export function Sidebar(p: {
             </button>
           </div>
         ))}
-        {q && rows.length === 0 && <div class="sb-empty">No repository matches “{q}”</div>}
+        {q && rows.length === 0 && <div class="sb-empty">Nothing matches “{q}”</div>}
         {!q && p.tabs.length === 0 && (
           <button class="sb-empty open" onClick={p.onOpen}>
             <Icon name="add" />
-            Open a repository
+            Open a folder
           </button>
         )}
       </div>
+      {peek && (
+        <div
+          class="sb-peek"
+          role="menu"
+          aria-label="Agent and terminal tabs"
+          style={{ top: `${peek.top}px`, left: `${peek.left}px` }}
+          onMouseEnter={() => clearTimeout(peekTimer.current)}
+          onMouseLeave={leaveTab}
+        >
+          {peek.terms.map((t) => {
+            const { label, busy } = termTitle(t)
+            return (
+              <button
+                key={t.id}
+                role="menuitem"
+                class={busy ? 'busy' : ''}
+                onClick={() => {
+                  setPeek(undefined)
+                  p.onPickTerm(peek.id, t.id)
+                }}
+              >
+                <Icon name={t.kind === 'shell' ? 'terminal' : busy ? 'loading' : 'sparkle'} />
+                <span class="label">{label}</span>
+              </button>
+            )
+          })}
+        </div>
+      )}
     </aside>
   )
 }

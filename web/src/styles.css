@@ -993,6 +993,7 @@ a {
 .detail-head .body {
   margin-top: 8px;
   white-space: pre-wrap;
+  overflow-wrap: anywhere;
   color: var(--fg-2);
   max-height: 120px;
   overflow: auto;
@@ -1156,11 +1157,34 @@ a {
   color: var(--fg-2);
 }
 
+.placeholder.no-git {
+  flex-direction: column;
+  gap: 4px;
+}
+
+.no-git > .codicon {
+  margin-bottom: 8px;
+  font-size: 44px;
+  color: var(--fg-3);
+}
+
+.no-git .ng-name {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--fg-bright);
+}
+
+.no-git .ng-acts {
+  display: flex;
+  gap: 8px;
+  margin-top: 16px;
+}
+
 .commit-box {
-  padding: 8px;
+  padding: 10px 10px 12px;
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 8px;
   border-bottom: 1px solid var(--line);
 }
 
@@ -1884,7 +1908,8 @@ body.dragging * {
 
 .sidebar.docked {
   position: relative;
-  z-index: 2;
+  /* above the main area, so a repository's tab preview can lie over it */
+  z-index: 30;
   flex: none;
   box-shadow: 4px 0 16px var(--shadow);
 }
@@ -1979,7 +2004,10 @@ body.dragging * {
   flex: 1;
   min-height: 0;
   overflow: auto;
-  padding-bottom: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 2px 0 8px;
 }
 
 .sb-section {
@@ -1991,10 +2019,12 @@ body.dragging * {
 }
 
 .sb-item {
+  position: relative;
+  flex: none;
   display: flex;
   align-items: center;
   gap: 8px;
-  height: 40px;
+  height: 42px;
   margin: 0 6px;
   padding: 0 4px 0 10px;
   border-radius: 6px;
@@ -2099,7 +2129,7 @@ body.dragging * {
 }
 
 .sb-item:hover .sb-state,
-.sb-item:focus-within .sb-state {
+.sb-item:has(:focus-visible) .sb-state {
   display: none;
 }
 
@@ -2129,7 +2159,7 @@ body.dragging * {
 }
 
 .sb-item:hover .acts,
-.sb-item:focus-within .acts {
+.sb-item:has(:focus-visible) .acts {
   display: flex;
 }
 
@@ -2139,6 +2169,73 @@ body.dragging * {
 
 .sb-item.recent {
   color: var(--fg-2);
+}
+
+.sb-item.lifted {
+  opacity: 0.45;
+}
+
+.sb-item.drop-before::before,
+.sb-item.drop-after::after {
+  content: '';
+  position: absolute;
+  left: 4px;
+  right: 4px;
+  height: 2px;
+  border-radius: 1px;
+  background: var(--focus);
+  pointer-events: none;
+}
+
+.sb-item.drop-before::before {
+  top: -3px;
+}
+
+.sb-item.drop-after::after {
+  bottom: -3px;
+}
+
+.sb-peek {
+  position: fixed;
+  z-index: 60;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 180px;
+  max-width: 300px;
+  padding: 4px;
+  background: var(--menu);
+  border: 1px solid var(--menu-border);
+  border-radius: 8px;
+  box-shadow: 0 8px 24px var(--shadow);
+}
+
+.sb-peek button {
+  justify-content: flex-start;
+  gap: 8px;
+  width: 100%;
+  height: 28px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 5px;
+  background: none;
+  color: var(--fg);
+}
+
+.sb-peek button:hover:not(:disabled) {
+  background: var(--menu-sel);
+  color: var(--btn-fg);
+}
+
+.sb-peek .label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sb-peek .busy .codicon,
+.term-tab.busy > .codicon {
+  animation: sb-spin 1.2s linear infinite;
 }
 
 .sb-empty {
@@ -2218,7 +2315,7 @@ button.sb-empty.open {
 .term-tabs {
   display: flex;
   align-items: center;
-  gap: 2px;
+  gap: 4px;
   min-width: 0;
   overflow-x: auto;
 }
@@ -2226,10 +2323,11 @@ button.sb-empty.open {
 .term-tab {
   display: inline-flex;
   align-items: center;
-  gap: 5px;
-  height: 24px;
-  padding: 0 2px 0 8px;
-  border-radius: 3px;
+  gap: 6px;
+  max-width: 240px;
+  height: 26px;
+  padding: 0 3px 0 10px;
+  border-radius: 6px;
   color: var(--fg-2);
   white-space: nowrap;
   cursor: default;
@@ -2242,6 +2340,11 @@ button.sb-empty.open {
 .term-tab.active {
   background: var(--toolbar-hover);
   color: var(--fg);
+}
+
+.term-tab .label {
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .term-tab.stopped .label {
@@ -2309,8 +2412,9 @@ button.sb-empty.open {
   display: flex;
   align-items: center;
   gap: 6px;
-  height: 30px;
-  padding: 0 6px 0 10px;
+  height: 34px;
+  padding: 0 8px 0 10px;
+  border-bottom: 1px solid var(--line);
   font-size: 11px;
 }
 
@@ -2330,7 +2434,7 @@ button.sb-empty.open {
 .agent-term {
   flex: 1;
   min-height: 0;
-  padding: 0 0 4px 10px;
+  padding: 4px 0 6px 14px;
 }
 
 .agent-term .xterm {
@@ -3064,4 +3168,46 @@ button.spin .codicon {
   margin-top: 6px;
   color: var(--fg-2);
   font-size: 12px;
+}
+
+.ai-perks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.ai-perks {
+  column-gap: 18px;
+}
+
+.ai-perks span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--fg);
+}
+
+.ai-perks .codicon {
+  color: var(--link);
+}
+
+.choices.cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: 8px;
+}
+
+.choices.cards label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border: 1px solid var(--input-border);
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.choices.cards label.on {
+  border-color: var(--focus);
+  background: color-mix(in srgb, var(--focus) 12%, transparent);
 }

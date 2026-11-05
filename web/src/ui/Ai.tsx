@@ -2,35 +2,44 @@ import { useEffect, useRef, useState } from 'preact/hooks'
 import { DEFAULT_PROMPTS } from '../git/ai'
 import type { AiInfo, AiSettings, AiTask, Backend, TermKind } from '../git/backend'
 import { COLORS } from '../git/scheme'
+import { Icon } from './bits'
 import { Buttons, Frame } from './Dialogs'
 
 const PROMPT_LABELS: Record<AiTask, string> = {
   commit: 'Commit message prompt',
   branch: 'Branch name prompt',
-  conflict: 'Conflict prompt, pasted into the agent terminal ({file} becomes the path)',
+  conflict: 'Conflict prompt ({file} is the path)',
 }
-
-const names = (list: string[]) => (list.length < 2 ? list.join('') : `${list.slice(0, -1).join(', ')} and ${list[list.length - 1]}`)
 
 export function AiConsent(p: { agents: AiInfo['agents']; onAnswer: (choice?: string | false) => void }) {
   const [agent, setAgent] = useState(p.agents[0]?.id)
   const chosen = p.agents.find((a) => a.id === agent)
   return (
     <Frame title="Use an AI agent?" cls="ai" onClose={() => p.onAnswer()}>
-      <div>
-        Ramulus found {names(p.agents.map((a) => a.name))} on this computer. The one you pick drafts commit messages and branch names for you to review, and runs in a terminal panel where you can chat with it and have it fix conflicts with its own tools.
+      <div class="ai-perks">
+        <span>
+          <Icon name="edit" />
+          Commit messages
+        </span>
+        <span>
+          <Icon name="git-branch" />
+          Branch names
+        </span>
+        <span>
+          <Icon name="terminal" />
+          Chat and fix conflicts
+        </span>
       </div>
-      <div>It uses its own sign-in, so you need no API key. The changes involved are sent to it, and it asks for your approval the same way it does in your own terminal.</div>
       {p.agents.length > 1 && (
-        <div class="choices" role="radiogroup" aria-label="Agent">
+        <div class="choices cards" role="radiogroup" aria-label="Agent">
           {p.agents.map((a) => (
-            <label key={a.id}>
+            <label key={a.id} class={agent === a.id ? 'on' : ''}>
               <input type="radio" name="ai-agent" checked={agent === a.id} onChange={() => setAgent(a.id)} /> {a.name}
             </label>
           ))}
         </div>
       )}
-      <div class="hint">You can change this later from AI agent settings in the command palette.</div>
+      <div class="hint">It uses its own sign-in, sees the changes involved, and asks before it edits anything.</div>
       <div class="buttons">
         <button onClick={() => p.onAnswer(false)}>Turn off</button>
         <button onClick={() => p.onAnswer()}>Not now</button>
@@ -49,11 +58,11 @@ export function AiSettingsDialog(p: { info: AiInfo; onSave: (s: AiSettings) => v
   return (
     <Frame title="AI agent" cls="ai" onClose={p.onClose}>
       {agents.length === 0 ? (
-        <div>No supported agent was found on your PATH. Ramulus looks for Claude Code, Codex, Gemini CLI and opencode, and uses the sign-in each one already has.</div>
+        <div>No agent found on your PATH. Install Claude Code, Codex, Gemini CLI or opencode.</div>
       ) : (
         <>
           <label>
-            <input type="checkbox" checked={s.enabled === true} onChange={(e) => setS({ ...s, enabled: (e.target as HTMLInputElement).checked, agent: s.agent ?? agents[0].id })} /> Let an AI agent help with commit messages, branch names and conflicts
+            <input type="checkbox" checked={s.enabled === true} onChange={(e) => setS({ ...s, enabled: (e.target as HTMLInputElement).checked, agent: s.agent ?? agents[0].id })} /> Use an AI agent
           </label>
           {s.enabled && agents.length > 1 && (
             <div class="choices" role="radiogroup" aria-label="Agent">
@@ -79,7 +88,7 @@ export function AiSettingsDialog(p: { info: AiInfo; onSave: (s: AiSettings) => v
           <textarea value={s.prompts[k] ?? DEFAULT_PROMPTS[k]} onInput={(e) => setPrompt(k, (e.target as HTMLTextAreaElement).value)} />
         </div>
       ))}
-      <div class="hint">Ramulus adds the staged changes or the branch names after the first two prompts.</div>
+      <div class="hint">The staged changes or branch names follow the first two prompts.</div>
       <Buttons ok="Save" enabled={true} onOk={() => (p.onSave(s), p.onClose())} onClose={p.onClose} />
     </Frame>
   )

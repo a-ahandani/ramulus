@@ -1,11 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'preact/hooks'
 import { DEFAULT_PROMPTS, branchName, fillPrompt, splitMessage } from '../git/ai'
-import type { AiInfo, AiSettings, Backend, MergeMethod, PrChange, PullMode, PullRequest, PushResult, RebaseResult, RemoteSwitch, TermKind } from '../git/backend'
+import type { AiInfo, AiSettings, Backend, MergeMethod, PrChange, PullMode, PullRequest, PushResult, RebaseResult, RemoteSwitch, TermKind, TermTab } from '../git/backend'
 import { layout, type RowLayout } from '../git/graph'
 import { PAGE, type Commit, type DiffArea, type FileChange, type NetSettings, type RepoData } from '../git/repo'
 import type { Scheme } from '../git/scheme'
 import { AgentTerminal, AiConsent, AiSettingsDialog } from './Ai'
-import { BrandLinks, BrandMark, Icon, SidebarToggle, laneColor, prsByBranch, short } from './bits'
+import { BrandLinks, BrandMark, Icon, SidebarToggle, laneColor, prsByBranch, short, termTitle } from './bits'
 import { DetailPanel, type FileSel } from './DetailPanel'
 import { PrCard } from './PrView'
 import { DiffWindow, tabKey, type DiffOptions, type DiffTab } from './DiffWindow'
@@ -81,9 +81,12 @@ const PULL_MODES: Record<PullMode, string> = { merge: 'Merge', 'ff-only': 'Fast-
 export interface TabApi {
   pull: () => Promise<void>
   fetch: () => Promise<void>
+  showTerm: (id: string) => void
 }
 
-export function App(p: { be: Backend; active: boolean; theme: Theme; onTheme: (t: Theme) => void; scheme?: Scheme; onScheme: (s?: Scheme) => void; onOpenRepo: () => void; onDirty: (dirty: boolean) => void; onApi: (api: TabApi) => void; onSearchRepos: () => void; onAll: (kind: 'pull' | 'fetch') => void; mergeMethod: MergeMethod; onMergeMethod: (m: MergeMethod) => void; onSummary: (s: RepoSummary) => void; sidebar: boolean; onToggleSidebar: () => void }) {
+const notGit = (e: unknown) => /not a git repository/i.test(e instanceof Error ? e.message : String(e))
+
+export function App(p: { be: Backend; name: string; active: boolean; theme: Theme; onTheme: (t: Theme) => void; scheme?: Scheme; onScheme: (s?: Scheme) => void; onOpenRepo: () => void; onDirty: (dirty: boolean) => void; onApi: (api: TabApi) => void; onSearchRepos: () => void; onAll: (kind: 'pull' | 'fetch') => void; mergeMethod: MergeMethod; onMergeMethod: (m: MergeMethod) => void; onSummary: (s: RepoSummary) => void; sidebar: boolean; onToggleSidebar: () => void }) {
   const theme = p.theme
   const look = p.scheme ? `scheme:${p.scheme.id}` : theme
   const setTheme = (t: Theme) => {
@@ -140,7 +143,8 @@ export function App(p: { be: Backend; active: boolean; theme: Theme; onTheme: (t
   const [aiDialog, setAiDialog] = useState<'consent' | 'settings'>()
   const [drafting, setDrafting] = useState<'commit' | 'branch'>()
   const draftStop = useRef<AbortController | undefined>(undefined)
-  const [terms, setTerms] = useState<{ id: string; kind: TermKind; agent?: string }[]>([])
+  const [terms, setTerms] = useState<TermTab[]>([])
+  const [noGit, setNoGit] = useState(false)
   const [termActive, setTermActive] = useState<string>()
   const [termRunning, setTermRunning] = useState<Record<string, boolean>>({})
   const termSeq = useRef(0)
@@ -207,8 +211,10 @@ export function App(p: { be: Backend; active: boolean; theme: Theme; onTheme: (t
     setBusy('Reading repository')
     try {
       applyData(be, await be.load(PAGE), PAGE, true)
+      setNoGit(false)
     } catch (e) {
-      fail('Could not read the repository', e)
+      if (notGit(e)) setNoGit(true)
+      else fail('Could not read the repository', e)
     } finally {
       setBusy(undefined)
     }
@@ -250,8 +256,24 @@ export function App(p: { be: Backend; active: boolean; theme: Theme; onTheme: (t
           return v.be.pull('ff-only', v.data.headBranch)
         }),
       fetch: () => remote('Fetching', (v) => v.be.fetchAll()),
+      showTerm: (id) => showTerm(id),
     })
   }, [])
+
+  useEffect(() => {
+    if (noGit) p.onSummary({ branch: '', changes: 0, ahead: 0, behind: 0, busy: false, noGit })
+  }, [noGit])
+
+  // a folder without git becomes a repository when someone runs git init in it, here or anywhere
+  useEffect(() => {
+    if (!noGit || !p.active || !p.be.subscribe) return
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const stop = p.be.subscribe(() => {
+      clearTimeout(timer)
+      timer = setTimeout(() => p.be.load(PAGE).then((d) => (setNoGit(false), applyData(p.be, d, PAGE, true)), () => {}), 300)
+    })
+    return () => (clearTimeout(timer), stop())
+  }, [noGit, p.active])
 
   useEffect(() => {
     if (!view?.be.subscribe || !p.active) return
@@ -386,7 +408,7 @@ export function App(p: { be: Backend; active: boolean; theme: Theme; onTheme: (t
     if (!view) return
     const i = view.indexOf.get(oid)
     if (i === undefined) {
-      setToast('That commit is not loaded in the graph yet.')
+      setToast('That commit is not loaded yet')
       return
     }
     if (soloInfo && !soloInfo.indices.includes(i)) setSolo(new Set())
@@ -459,7 +481,7 @@ export function App(p: { be: Backend; active: boolean; theme: Theme; onTheme: (t
         const m = splitMessage(reply)
         setSummary(m.summary)
         setDescription(m.description)
-        setToast(`${agentName(picked.agent)} drafted the message. Review it, then commit.`)
+        setToast(`${agentName(picked.agent)} drafted it. Review, then commit.`)
       } else setDialog((d) => (d?.kind === 'branch' ? { ...d, name: branchName(reply) } : d))
     } catch (e) {
       if (!stop.signal.aborted) say(e)
@@ -470,10 +492,11 @@ export function App(p: { be: Backend; active: boolean; theme: Theme; onTheme: (t
   }
 
   const activeTerm = terms.find((t) => t.id === termActive) ?? terms[terms.length - 1]
-  const termLabel = (t: { id: string; kind: TermKind; agent?: string }) => {
-    const name = t.kind === 'shell' ? 'Terminal' : agentName(t.agent)
-    const same = terms.filter((x) => x.kind === t.kind && x.agent === t.agent)
-    return same.length > 1 ? `${name} ${same.findIndex((x) => x.id === t.id) + 1}` : name
+  const termLabel = (t: TermTab) => {
+    const { label } = termTitle(t)
+    if (t.title) return label
+    const same = terms.filter((x) => !x.title && x.kind === t.kind && x.agent === t.agent)
+    return same.length > 1 ? `${label} ${same.findIndex((x) => x.id === t.id) + 1}` : label
   }
 
   // Only explicit opens take the keyboard, not the remount that comes with switching repositories.
@@ -545,9 +568,26 @@ export function App(p: { be: Backend; active: boolean; theme: Theme; onTheme: (t
     p.be.termList?.().then((list) => {
       if (!list.length) return
       setTerms((ts) => [...list, ...ts])
+      // the tabs open when Ramulus last closed come back where they were
+      setDrawerShown(true)
     }, () => {})
     return () => void p.be.termStop?.().catch(() => {})
   }, [])
+
+  // titles change as the programs run, such as Claude Code naming the conversation and showing it is working
+  useEffect(() => {
+    if (!drawerShown || !p.active || !terms.length || !p.be.termList) return
+    const timer = setInterval(
+      () =>
+        p.be.termList!().then((list) => {
+          const titles = new Map(list.map((t) => [t.id, t.title]))
+          const changed = (t: TermTab) => titles.has(t.id) && titles.get(t.id) !== t.title
+          setTerms((ts) => (ts.some(changed) ? ts.map((t) => (changed(t) ? { ...t, title: titles.get(t.id) } : t)) : ts))
+        }, () => {}),
+      1500,
+    )
+    return () => clearInterval(timer)
+  }, [drawerShown, p.active, terms.length])
 
   const closeDialog = () => {
     if (drafting === 'branch') draftStop.current?.abort()
@@ -604,8 +644,8 @@ export function App(p: { be: Backend; active: boolean; theme: Theme; onTheme: (t
       after: (r) => {
         const res = r as RebaseResult
         setUndo({ before: res.before, onto: label })
-        if (res.result === 'conflicts') setToast('The rebase stopped on conflicts. Resolve them and Continue, or Abort to go back.')
-        else if (res.result === 'stash-conflicts') setToast('Rebased. Your uncommitted changes conflicted when they were put back.')
+        if (res.result === 'conflicts') setToast('Rebase stopped on conflicts')
+        else if (res.result === 'stash-conflicts') setToast('Rebased. Your changes conflicted when put back.')
       },
     })
   }
@@ -629,7 +669,7 @@ export function App(p: { be: Backend; active: boolean; theme: Theme; onTheme: (t
         }
         return v.be.push(head!)
       }, {
-        after: (x) => (x === 'conflicts' ? setToast('Resolve the conflicts and Continue, then push again.') : afterPush(x as PushResult | void)),
+        after: (x) => (x === 'conflicts' ? setToast('Resolve, Continue, then push again') : afterPush(x as PushResult | void)),
       })
     const n = (k: number) => `${k} commit${k === 1 ? '' : 's'}`
     const force = () => confirm(`Force pushing replaces ${head} on the remote and drops ${n(r.behind)} that only the remote has. Continue?`, () => pushHead(r.theirs))
@@ -1014,15 +1054,13 @@ export function App(p: { be: Backend; active: boolean; theme: Theme; onTheme: (t
         )}
         <span class="spacer" />
         {updatedAt && (
-          <button onClick={() => reload()} title="Refresh now">
+          <button onClick={() => reload()} title={`Updated ${updatedAt.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })}. Refresh now`} aria-label="Refresh">
             <Icon name="refresh" />
-            Updated {updatedAt.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })}
           </button>
         )}
         {v && (
-          <button onClick={() => openPalette(true)} title="Command palette (⌘⇧P)">
+          <button onClick={() => openPalette(true)} title="Commands (⌘⇧P)" aria-label="Commands">
             <Icon name="list-selection" />
-            Commands
           </button>
         )}
         <button onClick={() => setShortcuts(true)} title="Keyboard shortcuts (?)">
@@ -1035,15 +1073,155 @@ export function App(p: { be: Backend; active: boolean; theme: Theme; onTheme: (t
     )
   }
 
+  const drawer = activeTerm && drawerShown && p.active && (
+
+    <div class="agent-drawer" style={drawerMax ? undefined : { height: `${drawerH}px` }}>
+      {!drawerMax && <Splitter horizontal onDrag={(dy) => setDrawerH((h) => clamp(h - dy, 120, innerHeight - 200))} />}
+      <div class="drawer-head">
+        <div class="term-tabs" role="tablist" aria-label="Agent and terminal tabs">
+          {terms.map((t) => (
+            <div
+              key={t.id}
+              role="tab"
+              tabIndex={0}
+              aria-selected={t.id === activeTerm.id}
+              class={`term-tab ${t.id === activeTerm.id ? 'active' : ''} ${termRunning[t.id] === false ? 'stopped' : ''} ${termTitle(t).busy ? 'busy' : ''}`}
+              title={termRunning[t.id] === false ? `${termLabel(t)} (stopped)` : termLabel(t)}
+              onClick={() => showTerm(t.id)}
+              onKeyDown={(e) => (e.key === 'Enter' || e.key === ' ') && showTerm(t.id)}
+            >
+              <Icon name={t.kind === 'shell' ? 'terminal' : termTitle(t).busy ? 'loading' : 'sparkle'} />
+              <span class="label">{termLabel(t)}</span>
+              <button
+                class="icon"
+                title="Close this tab"
+                aria-label={`Close ${termLabel(t)}`}
+                onClick={(e) => {
+                  e.stopPropagation()
+                  closeTerm(t.id)
+                }}
+              >
+                <Icon name="close" />
+              </button>
+            </div>
+          ))}
+          <button class="icon" title="New agent or terminal tab" aria-label="New agent or terminal tab" onClick={newTermMenu}>
+            <Icon name="add" />
+          </button>
+        </div>
+        <span class="spacer" />
+        <button class="icon" title={`Restart this ${activeTerm.kind === 'shell' ? 'terminal' : 'agent'}`} aria-label="Restart this tab" onClick={() => setRestart((r) => ({ tab: activeTerm.id, n: r.n + 1 }))}>
+          <Icon name="debug-restart" />
+        </button>
+        <button class="icon" title="AI agent settings" aria-label="AI agent settings" onClick={openAiSettings}>
+          <Icon name="settings-gear" />
+        </button>
+        <button class="icon" title={drawerMax ? 'Restore the panel' : 'Maximize the panel'} aria-label={drawerMax ? 'Restore the panel' : 'Maximize the panel'} onClick={() => setDrawerMax((m) => !m)}>
+          <Icon name={drawerMax ? 'screen-normal' : 'screen-full'} />
+        </button>
+        <button class="icon" title="Hide the panel (⌃`)" aria-label="Hide the panel" onClick={() => setDrawerShown(false)}>
+          <Icon name="chevron-down" />
+        </button>
+      </div>
+      <AgentTerminal
+        key={activeTerm.id}
+        be={p.be}
+        id={activeTerm.id}
+        kind={activeTerm.kind}
+        agent={activeTerm.agent}
+        look={look}
+        focus={termFocus}
+        onFocused={() => setTermFocus(false)}
+        paste={paste?.tab === activeTerm.id ? paste : undefined}
+        restart={restart.tab === activeTerm.id ? restart.n : 0}
+        onState={(st) => setTermRunning((m) => ({ ...m, [activeTerm.id]: st.running }))}
+        onPasted={() => setPaste(undefined)}
+      />
+    </div>
+  )
+  const drawerCls = `${terms.length && drawerShown ? 'with-drawer' : ''} ${terms.length && drawerShown && drawerMax ? 'drawer-max' : ''}`
+  const initRepo = () =>
+    p.be.init!().then(
+      () => openBackend(p.be),
+      (e) => fail('Could not start a repository', e),
+    )
+  const aiDialogs = (
+    <>
+      {aiDialog === 'consent' && aiInfo && <AiConsent agents={aiInfo.agents} onAnswer={answerConsent} />}
+      {aiDialog === 'settings' && aiInfo && (
+        <AiSettingsDialog
+          info={aiInfo}
+          onClose={() => setAiDialog(undefined)}
+          onSave={(settings) =>
+            p.be
+              .setAi!(settings)
+              .then(() => setAiInfo({ ...aiInfo, settings }))
+              .catch((e) => fail('Could not save the AI settings', e))
+          }
+        />
+      )}
+    </>
+  )
+
   if (!view) {
     return (
-      <div class="app">
-        <div class="toolbar" />
-        <div class="placeholder">{busy ? `${busy}...` : 'This repository could not be read.'}</div>
+      <div class={`app ${drawerCls}`}>
+        <div class="toolbar">
+          {noGit && (
+            <>
+              <div class="tb-side">
+                <BrandMark />
+                <span class="repo">{p.name}</span>
+              </div>
+              <div />
+              <div class="tb-side tb-end">
+                <SidebarToggle on={p.sidebar} onToggle={p.onToggleSidebar} />
+                {p.be.termStart && (
+                  <button class={`ai-btn ${drawerShown ? 'on' : ''}`} onClick={toggleAgent} title="Agent and terminals (⌃`)" aria-pressed={drawerShown}>
+                    <Icon name="sparkle" />
+                    Agent
+                  </button>
+                )}
+              </div>
+            </>
+          )}
+        </div>
+        {noGit ? (
+          <div class="placeholder no-git">
+            <Icon name="folder-opened" />
+            <div class="ng-name">{p.name}</div>
+            <div class="ng-note">No git repository yet</div>
+            <div class="ng-acts">
+              {p.be.init && (
+                <button class="primary" onClick={initRepo}>
+                  <Icon name="git-branch-create" />
+                  Initialize git
+                </button>
+              )}
+              {p.be.termStart && (
+                <>
+                  <button class="secondary" onClick={() => void openAgent()}>
+                    <Icon name="sparkle" />
+                    Agent
+                  </button>
+                  <button class="secondary" onClick={() => void addTerm('shell')}>
+                    <Icon name="terminal" />
+                    Terminal
+                  </button>
+                </>
+              )}
+            </div>
+          </div>
+        ) : (
+          <div class="placeholder">{busy ? `${busy}...` : 'This repository could not be read.'}</div>
+        )}
+        {drawer}
         {statusBar()}
         {menu && <Menu menu={menu} onClose={() => setMenu(undefined)} />}
         {shortcuts && <Shortcuts onClose={() => setShortcuts(false)} />}
         {dialog && <Dialogs dialog={dialog} settings={settings} native={p.be.native} onClose={() => setDialog(undefined)} onCreateBranch={() => {}} onCreateTag={() => {}} onRename={() => {}} onStash={() => {}} onReset={() => {}} onSettings={() => {}} onScheme={p.onScheme} />}
+        {aiDialogs}
+        {toast && <div class="toast">{toast}</div>}
       </div>
     )
   }
@@ -1091,7 +1269,7 @@ export function App(p: { be: Backend; active: boolean; theme: Theme; onTheme: (t
     })
 
   return (
-    <div class={`app ${terms.length && drawerShown ? 'with-drawer' : ''} ${terms.length && drawerShown && drawerMax ? 'drawer-max' : ''}`}>
+    <div class={`app ${drawerCls}`}>
       <div class="toolbar">
         <div class="tb-side">
           <BrandMark />
@@ -1299,71 +1477,7 @@ export function App(p: { be: Backend; active: boolean; theme: Theme; onTheme: (t
           />
         )}
       </div>
-      {activeTerm && drawerShown && p.active && (
-        <div class="agent-drawer" style={drawerMax ? undefined : { height: `${drawerH}px` }}>
-          {!drawerMax && <Splitter horizontal onDrag={(dy) => setDrawerH((h) => clamp(h - dy, 120, innerHeight - 200))} />}
-          <div class="drawer-head">
-            <div class="term-tabs" role="tablist" aria-label="Agent and terminal tabs">
-              {terms.map((t) => (
-                <div
-                  key={t.id}
-                  role="tab"
-                  tabIndex={0}
-                  aria-selected={t.id === activeTerm.id}
-                  class={`term-tab ${t.id === activeTerm.id ? 'active' : ''} ${termRunning[t.id] === false ? 'stopped' : ''}`}
-                  title={termRunning[t.id] === false ? `${termLabel(t)} (stopped)` : termLabel(t)}
-                  onClick={() => showTerm(t.id)}
-                  onKeyDown={(e) => (e.key === 'Enter' || e.key === ' ') && showTerm(t.id)}
-                >
-                  <Icon name={t.kind === 'shell' ? 'terminal' : 'sparkle'} />
-                  <span class="label">{termLabel(t)}</span>
-                  <button
-                    class="icon"
-                    title="Close this tab"
-                    aria-label={`Close ${termLabel(t)}`}
-                    onClick={(e) => {
-                      e.stopPropagation()
-                      closeTerm(t.id)
-                    }}
-                  >
-                    <Icon name="close" />
-                  </button>
-                </div>
-              ))}
-              <button class="icon" title="New agent or terminal tab" aria-label="New agent or terminal tab" onClick={newTermMenu}>
-                <Icon name="add" />
-              </button>
-            </div>
-            <span class="spacer" />
-            <button class="icon" title={`Restart this ${activeTerm.kind === 'shell' ? 'terminal' : 'agent'}`} aria-label="Restart this tab" onClick={() => setRestart((r) => ({ tab: activeTerm.id, n: r.n + 1 }))}>
-              <Icon name="debug-restart" />
-            </button>
-            <button class="icon" title="AI agent settings" aria-label="AI agent settings" onClick={openAiSettings}>
-              <Icon name="settings-gear" />
-            </button>
-            <button class="icon" title={drawerMax ? 'Restore the panel' : 'Maximize the panel'} aria-label={drawerMax ? 'Restore the panel' : 'Maximize the panel'} onClick={() => setDrawerMax((m) => !m)}>
-              <Icon name={drawerMax ? 'screen-normal' : 'screen-full'} />
-            </button>
-            <button class="icon" title="Hide the panel (⌃`)" aria-label="Hide the panel" onClick={() => setDrawerShown(false)}>
-              <Icon name="chevron-down" />
-            </button>
-          </div>
-          <AgentTerminal
-            key={activeTerm.id}
-            be={p.be}
-            id={activeTerm.id}
-            kind={activeTerm.kind}
-            agent={activeTerm.agent}
-            look={look}
-            focus={termFocus}
-            onFocused={() => setTermFocus(false)}
-            paste={paste?.tab === activeTerm.id ? paste : undefined}
-            restart={restart.tab === activeTerm.id ? restart.n : 0}
-            onState={(st) => setTermRunning((m) => ({ ...m, [activeTerm.id]: st.running }))}
-            onPasted={() => setPaste(undefined)}
-          />
-        </div>
-      )}
+      {drawer}
       {statusBar(v)}
       {menu && <Menu menu={menu} onClose={() => setMenu(undefined)} />}
       {palette && (
@@ -1394,19 +1508,7 @@ export function App(p: { be: Backend; active: boolean; theme: Theme; onTheme: (t
           suggesting={drafting === 'branch'}
         />
       )}
-      {aiDialog === 'consent' && aiInfo && <AiConsent agents={aiInfo.agents} onAnswer={answerConsent} />}
-      {aiDialog === 'settings' && aiInfo && (
-        <AiSettingsDialog
-          info={aiInfo}
-          onClose={() => setAiDialog(undefined)}
-          onSave={(settings) =>
-            p.be
-              .setAi!(settings)
-              .then(() => setAiInfo({ ...aiInfo, settings }))
-              .catch((e) => fail('Could not save the AI settings', e))
-          }
-        />
-      )}
+      {aiDialogs}
       {undo && v.data.status.state !== 'rebase' && (
         <div class="undo-bar" role="status">
           <Icon name="history" />
