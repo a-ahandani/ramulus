@@ -55,6 +55,14 @@ export type PrChange = 'ready' | 'draft' | 'close' | 'reopen'
 
 export type CheckState = 'pass' | 'fail' | 'running' | 'cancelled' | 'skipped'
 
+/** one GitHub Actions workflow's latest run on a commit */
+export interface CiRun {
+  sha: string
+  workflow: string
+  state: CheckState
+  url: string
+}
+
 export interface PullRequestDetail {
   number: number
   title: string
@@ -121,6 +129,7 @@ export interface Backend {
   status(): Promise<WorkStatus>
   files(): Promise<string[]>
   prs?(): Promise<PullRequest[]>
+  ciRuns?(): Promise<CiRun[]>
   prMerge?(number: number, method: MergeMethod): Promise<void>
   prView?(number: number): Promise<PullRequestDetail>
   prConversation?(number: number): Promise<PrConversation>

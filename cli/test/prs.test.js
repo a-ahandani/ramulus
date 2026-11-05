@@ -4,11 +4,13 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { after, describe, it } from 'node:test'
 import { readFileSync } from 'node:fs'
-import { changePullRequest, mergePullRequest, prConversation, pullRequest, pullRequests } from '../lib/prs.js'
+import { changePullRequest, ciRuns, mergePullRequest, prConversation, pullRequest, pullRequests } from '../lib/prs.js'
 
 const root = mkdtempSync(join(tmpdir(), 'ramulus-prs-'))
 const bin = join(root, 'bin')
 const LIST = '[{"number":7,"title":"Add login","url":"https://github.com/o/r/pull/7","headRefName":"login","headRefOid":"aaa1","baseRefName":"main","state":"OPEN","isDraft":true},{"number":3,"title":"Old","url":"https://github.com/o/r/pull/3","headRefName":"old","headRefOid":"bbb2","baseRefName":"main","state":"MERGED","isDraft":false}]'
+
+const RUNS = '[{"headSha":"c1","status":"in_progress","conclusion":"","workflowName":"CLI","url":"u1"},{"headSha":"c1","status":"completed","conclusion":"failure","workflowName":"Server","url":"u2"},{"headSha":"c1","status":"completed","conclusion":"success","workflowName":"CLI","url":"u0"},{"headSha":"c0","status":"completed","conclusion":"cancelled","workflowName":"CLI","url":"u3"},{"headSha":"c0","status":"completed","conclusion":"neutral","workflowName":"Docs","url":"u4"}]'
 
 after(() => rmSync(root, { recursive: true, force: true }))
 
@@ -16,7 +18,7 @@ describe('pull requests', { skip: process.platform === 'win32' }, () => {
   mkdirSync(bin)
   writeFileSync(
     join(bin, 'gh'),
-    `#!/bin/sh\nif [ -n "$GITHUB_TOKEN" ]; then echo 'HTTP 401: Bad credentials' >&2; exit 1; fi\nif [ "$1" = api ]; then printf '%s\\n' "$@" >> "${join(root, 'api.log')}"; /bin/cat "${join(root, 'talk.json')}"; exit 0; fi\nif [ "$2" = view ]; then /bin/cat "${join(root, 'view.json')}"; exit 0; fi\nif [ "$2" = ready ] || [ "$2" = close ] || [ "$2" = reopen ]; then echo "$@" >> "${join(root, 'changes.log')}"; exit 0; fi\nif [ "$2" = merge ]; then echo "$@" >> "${join(root, 'merges.log')}"; if [ "$3" = 9 ]; then echo 'Pull request is not mergeable: the merge commit cannot be cleanly created.' >&2; exit 1; fi; exit 0; fi\necho '${LIST}'\n`,
+    `#!/bin/sh\nif [ -n "$GITHUB_TOKEN" ]; then echo 'HTTP 401: Bad credentials' >&2; exit 1; fi\nif [ "$1" = api ]; then printf '%s\\n' "$@" >> "${join(root, 'api.log')}"; /bin/cat "${join(root, 'talk.json')}"; exit 0; fi\nif [ "$2" = view ]; then /bin/cat "${join(root, 'view.json')}"; exit 0; fi\nif [ "$2" = ready ] || [ "$2" = close ] || [ "$2" = reopen ]; then echo "$@" >> "${join(root, 'changes.log')}"; exit 0; fi\nif [ "$2" = merge ]; then echo "$@" >> "${join(root, 'merges.log')}"; if [ "$3" = 9 ]; then echo 'Pull request is not mergeable: the merge commit cannot be cleanly created.' >&2; exit 1; fi; exit 0; fi\nif [ "$1" = run ]; then echo '${RUNS}'; exit 0; fi\necho '${LIST}'\n`,
   )
   chmodSync(join(bin, 'gh'), 0o755)
   const repo = (name) => {
@@ -30,6 +32,15 @@ describe('pull requests', { skip: process.platform === 'win32' }, () => {
     assert.deepEqual(list, [
       { number: 7, title: 'Add login', url: 'https://github.com/o/r/pull/7', branch: 'login', oid: 'aaa1', base: 'main', state: 'DRAFT' },
       { number: 3, title: 'Old', url: 'https://github.com/o/r/pull/3', branch: 'old', oid: 'bbb2', base: 'main', state: 'MERGED' },
+    ])
+  })
+
+  it('reads the newest Actions run per commit and workflow, with its state', async () => {
+    assert.deepEqual(await ciRuns(repo('runs'), { PATH: bin, GITHUB_TOKEN: 'stale' }), [
+      { sha: 'c1', workflow: 'CLI', state: 'running', url: 'u1' },
+      { sha: 'c1', workflow: 'Server', state: 'fail', url: 'u2' },
+      { sha: 'c0', workflow: 'CLI', state: 'cancelled', url: 'u3' },
+      { sha: 'c0', workflow: 'Docs', state: 'skipped', url: 'u4' },
     ])
   })
 

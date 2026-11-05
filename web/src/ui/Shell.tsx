@@ -63,7 +63,7 @@ const fallbackAuthor = () => {
 const keepsSidebar = () => !!document.querySelector('.sidebar :focus-visible')
 
 const ALL_AT_ONCE = 3
-const sameSummary = (a: RepoSummary | undefined, b: RepoSummary) => !!a && a.branch === b.branch && a.changes === b.changes && a.ahead === b.ahead && a.behind === b.behind && a.busy === b.busy && a.noGit === b.noGit && a.agent === b.agent
+const sameSummary = (a: RepoSummary | undefined, b: RepoSummary) => !!a && a.branch === b.branch && a.changes === b.changes && a.ahead === b.ahead && a.behind === b.behind && a.busy === b.busy && a.noGit === b.noGit && a.agent === b.agent && a.ci === b.ci
 const isMergeMethod = (m: unknown): m is MergeMethod => m === 'merge' || m === 'squash' || m === 'rebase'
 
 export function Shell() {

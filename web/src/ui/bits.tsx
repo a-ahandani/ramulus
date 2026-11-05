@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'preact/hooks'
-import type { PullRequest, TermTab } from '../git/backend'
+import type { CheckState, CiRun, PullRequest, TermTab } from '../git/backend'
 import type { BranchInfo } from '../git/repo'
 
 export const LANES = 10
@@ -58,6 +58,21 @@ export function prsByBranch(list: PullRequest[]): Map<string, PullRequest> {
   for (const pr of list) if (!out.has(pr.branch) || (open(pr) && !open(out.get(pr.branch)))) out.set(pr.branch, pr)
   return out
 }
+
+/** the runs of each commit */
+export function ciByCommit(runs: CiRun[]): Map<string, CiRun[]> {
+  const out = new Map<string, CiRun[]>()
+  for (const r of runs) out.set(r.sha, [...(out.get(r.sha) ?? []), r])
+  return out
+}
+
+/** one state for a commit's runs: a failure outweighs a run still going, which outweighs a pass */
+export function ciState(runs: CiRun[] = []): CheckState | undefined {
+  return (['fail', 'running', 'pass', 'cancelled', 'skipped'] as const).find((s) => runs.some((r) => r.state === s))
+}
+
+export const CI_ICON: Record<CheckState, string> = { pass: 'pass-filled', fail: 'error', running: 'loading', cancelled: 'circle-slash', skipped: 'circle-slash' }
+export const CI_WORD: Record<CheckState, string> = { pass: 'passed', fail: 'failed', running: 'running', cancelled: 'cancelled', skipped: 'skipped' }
 
 /** the agent tabs that were working before and are idle now */
 export function finished(before: TermTab[], after: TermTab[]): string[] {

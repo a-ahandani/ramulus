@@ -14,10 +14,14 @@ const VIEW_FRESH: Duration = Duration::from_secs(20);
 const FIELDS: &str = "number,title,url,headRefName,headRefOid,baseRefName,state,isDraft";
 const VIEW_FIELDS: &str = "number,title,body,state,isDraft,author,headRefName,baseRefName,url,createdAt,reviewDecision,mergeStateStatus,statusCheckRollup";
 const METHODS: [&str; 3] = ["merge", "squash", "rebase"];
+const RUN_FIELDS: &str = "headSha,status,conclusion,workflowName,url";
+// the app asks again every few seconds while a run is going, so this cache is short
+const RUNS_FRESH: Duration = Duration::from_secs(10);
 
 type Cached<T> = LazyLock<Mutex<HashMap<String, (Instant, T)>>>;
 static CACHE: Cached<Vec<Value>> = LazyLock::new(Default::default);
 static VIEWS: Cached<Value> = LazyLock::new(Default::default);
+static RUNS: Cached<Vec<Value>> = LazyLock::new(Default::default);
 
 async fn gh(bin: &Path, args: &[String], dir: &str, env: &Env) -> Result<String> {
     let mut cmd = Command::new(bin);
@@ -84,6 +88,45 @@ async fn load(dir: &str, env: &Env) -> Vec<Value> {
         .iter()
         .map(|p| json!({ "number": p["number"], "title": p["title"], "url": p["url"], "branch": p["headRefName"], "oid": p["headRefOid"], "base": p["baseRefName"], "state": state(p) }))
         .collect()
+}
+
+fn run_state(r: &Value) -> &'static str {
+    if r["status"] != "completed" {
+        return "running";
+    }
+    match r["conclusion"].as_str() {
+        Some("success") => "pass",
+        Some("failure" | "timed_out" | "action_required" | "startup_failure") => "fail",
+        Some("cancelled") => "cancelled",
+        _ => "skipped",
+    }
+}
+
+async fn load_runs(dir: &str, env: &Env) -> Vec<Value> {
+    let Ok(out) = gh_signed_in(&strs(&["run", "list", "--limit", "100", "--json", RUN_FIELDS]), dir, env).await else {
+        return vec![];
+    };
+    let Ok(Value::Array(items)) = serde_json::from_str::<Value>(&out) else { return vec![] };
+    let mut seen = std::collections::HashSet::new();
+    // newest first, so a later run of the same workflow on the same commit hides the one before
+    items
+        .iter()
+        .filter(|r| seen.insert(format!("{}\n{}", r["headSha"], r["workflowName"])))
+        .map(|r| json!({ "sha": r["headSha"], "workflow": r["workflowName"], "state": run_state(r), "url": r["url"] }))
+        .collect()
+}
+
+/// The repository's recent GitHub Actions runs, one per commit and workflow; empty without gh or GitHub.
+pub async fn ci_runs(dir: &str, env: &Env) -> Vec<Value> {
+    if let Some((at, list)) = RUNS.lock().unwrap().get(dir) {
+        if at.elapsed() < RUNS_FRESH {
+            return list.clone();
+        }
+    }
+    let at = Instant::now();
+    let list = load_runs(dir, env).await;
+    RUNS.lock().unwrap().insert(dir.to_string(), (at, list.clone()));
+    list
 }
 
 pub async fn pull_requests(dir: &str, env: &Env) -> Vec<Value> {

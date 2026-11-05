@@ -55,11 +55,12 @@ pub struct App {
 }
 
 const SHELL_OPS: [&str; 10] = ["repos", "pins", "setPins", "prefs", "setPrefs", "findRepos", "pickFolder", "ai", "setAi", "openRepo"];
-const REPO_OPS: [&str; 49] = [
+const REPO_OPS: [&str; 50] = [
     "load",
     "init",
     "files",
     "prs",
+    "ciRuns",
     "prMerge",
     "prView",
     "prConversation",
@@ -378,6 +379,7 @@ impl App {
             "init" => git::run(repo, &["init"], None).await.and_then(|_| done()),
             "files" => val(git::files(repo).await?),
             "prs" => Ok(Value::Array(prs::pull_requests(repo, env).await)),
+            "ciRuns" => Ok(Value::Array(prs::ci_runs(repo, env).await)),
             "prMerge" => prs::merge_pull_request(repo, b.i64("number").unwrap_or(0), &b.string("method"), env)
                 .await
                 .and_then(|_| done()),

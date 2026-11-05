@@ -1,7 +1,7 @@
 import type { JSX } from 'preact'
 import { useEffect, useRef, useState } from 'preact/hooks'
-import type { TermTab } from '../git/backend'
-import { Icon, termTitle } from './bits'
+import type { CheckState, TermTab } from '../git/backend'
+import { CI_ICON, Icon, termTitle } from './bits'
 import { fuzzyScore } from './Palette'
 
 export interface RepoSummary {
@@ -14,6 +14,8 @@ export interface RepoSummary {
   noGit?: boolean
   /** an agent tab is working, or finished while nobody was looking at it */
   agent?: 'working' | 'waiting'
+  /** GitHub Actions on the checked-out commit */
+  ci?: CheckState
 }
 
 export interface SideTab {
@@ -243,6 +245,11 @@ export function Sidebar(p: {
         {t.summary && (
           <span class="sb-state">
             {t.summary.busy && <Icon name="sync" />}
+            {(t.summary.ci === 'running' || t.summary.ci === 'fail') && (
+              <span class={`ci ${t.summary.ci}`} title={t.summary.ci === 'fail' ? 'GitHub checks failed on the checked-out commit' : 'GitHub checks are running on the checked-out commit'}>
+                <Icon name={CI_ICON[t.summary.ci]} />
+              </span>
+            )}
             {t.summary.agent === 'waiting' && (
               <span class="agent-waiting" title="Your agent finished. Open the project to see what it did">
                 <Icon name="sparkle-filled" />

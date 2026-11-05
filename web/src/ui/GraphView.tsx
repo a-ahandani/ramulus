@@ -1,8 +1,9 @@
 import type { JSX } from 'preact'
 import { useEffect, useLayoutEffect, useRef, useState } from 'preact/hooks'
+import type { CiRun } from '../git/backend'
 import type { RowLayout } from '../git/graph'
 import type { BranchInfo, Commit, RefLabel } from '../git/repo'
-import { ago, Avatar, fmtDate, Icon, laneColor, Laptop, short } from './bits'
+import { ago, Avatar, CI_ICON, CI_WORD, ciState, fmtDate, Icon, laneColor, Laptop, short } from './bits'
 
 export const ROW_H = 30
 const COL_W = 24
@@ -43,6 +44,9 @@ export interface GraphProps {
   soloCount: number
   onSelect: (index: number) => void
   onContextMenu: (e: MouseEvent, index: number) => void
+  /** GitHub Actions runs by commit */
+  ci: Map<string, CiRun[]>
+  onCi: (e: MouseEvent, runs: CiRun[]) => void
   onPillDoubleClick: (pill: PillData) => void
   onDrop: (info: DropInfo) => void
   onLoadMore: () => void
@@ -331,6 +335,8 @@ export function GraphView(p: GraphProps) {
     const lay = p.layoutOf(idx)
     const color = laneColor(lay.column)
     const pills = c.kind === 'wip' ? [] : groupPills(p.refsByOid.get(c.id) ?? [], p.branches)
+    const runs = c.kind === 'wip' ? undefined : p.ci.get(c.id)
+    const ci = ciState(runs)
     items.push(
       <div
         key={c.id}
@@ -358,6 +364,19 @@ export function GraphView(p: GraphProps) {
         </div>
         <Lanes lay={lay} kind={c.kind} author={c.author} email={c.email} drawEdges={p.showEdges} />
         <div class={`msg ${c.kind}`} title={c.kind === 'wip' ? undefined : `${c.summary}\n${c.author} · ${fmtDate(c.time)} · ${short(c.id)}`}>
+          {ci && runs && (
+            <button
+              class={`ci-mark ${ci}`}
+              title={runs.map((r) => `${r.workflow}: ${CI_WORD[r.state]}`).join('\n')}
+              aria-label={`GitHub checks ${CI_WORD[ci]}`}
+              onClick={(e) => {
+                e.stopPropagation()
+                p.onCi(e, runs)
+              }}
+            >
+              <Icon name={CI_ICON[ci]} />
+            </button>
+          )}
           {c.kind === 'wip' ? `Uncommitted changes · ${p.wipCount} file${p.wipCount === 1 ? '' : 's'}` : c.summary}
         </div>
         {showWhen && (

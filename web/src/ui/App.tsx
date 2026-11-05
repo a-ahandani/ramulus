@@ -1,12 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'preact/hooks'
 import { DEFAULT_PROMPTS, branchName, splitMessage } from '../git/ai'
-import type { AiInfo, AiSettings, Backend, MergeMethod, PrChange, PullMode, PullRequest, PushResult, RebaseResult, RemoteSwitch } from '../git/backend'
+import type { AiInfo, AiSettings, Backend, CiRun, MergeMethod, PrChange, PullMode, PullRequest, PushResult, RebaseResult, RemoteSwitch } from '../git/backend'
 import { layout, type RowLayout } from '../git/graph'
 import { PAGE, type Commit, type DiffArea, type FileChange, type NetSettings, type RepoData } from '../git/repo'
 import type { Scheme } from '../git/scheme'
 import { AiConsent, AiSettingsDialog } from './Ai'
 import { useAgentPanel } from './AgentPanel'
-import { BrandMark, Icon, cannotFastForward, clamp, laneColor, mergedBranches, prsByBranch, short, stored } from './bits'
+import { BrandMark, CI_WORD, Icon, cannotFastForward, ciByCommit, ciState, clamp, laneColor, mergedBranches, prsByBranch, short, stored, webUrl } from './bits'
 import { DetailPanel, type FileSel } from './DetailPanel'
 import { PrCard } from './PrView'
 import { DiffWindow, tabKey, type DiffOptions, type DiffTab } from './DiffWindow'
@@ -129,6 +129,9 @@ export function App(p: { be: Backend; name: string; active: boolean; theme: Them
   const [showLeft, setShowLeft] = useState(true)
   const [leftMode, setLeftMode] = useState<LeftMode>('branches')
   const [prs, setPrs] = useState<Map<string, PullRequest>>(new Map())
+  const [ci, setCi] = useState<Map<string, CiRun[]>>(new Map())
+  // until when to keep looking for the runs a push has just started
+  const [ciSoon, setCiSoon] = useState(0)
   const [leftW, setLeftW] = useState(() => Number(stored('ramulus.leftw')) || 380)
   const [scrollTo, setScrollTo] = useState<number>()
   const [updatedAt, setUpdatedAt] = useState<Date>()
@@ -280,6 +283,25 @@ export function App(p: { be: Backend; name: string; active: boolean; theme: Them
       live = false
     }
   }, [view])
+
+  useEffect(() => {
+    if (!view || !p.be.ciRuns) return
+    let live = true
+    p.be.ciRuns().then((list) => live && setCi(ciByCommit(list)), () => {})
+    return () => {
+      live = false
+    }
+  }, [view])
+
+  // CI is asked again while a run is going: any run in the visible repository, only the checked-out commit's in a hidden one
+  const ciGoing = (runs?: CiRun[]) => !!runs?.some((r) => r.state === 'running')
+  const headCi = view?.data.headOid ? ci.get(view.data.headOid) : undefined
+  const ciPoll = !!p.be.ciRuns && (p.active ? [...ci.values()].some(ciGoing) || ciSoon > Date.now() : ciGoing(headCi))
+  useEffect(() => {
+    if (!ciPoll) return
+    const timer = setInterval(() => p.be.ciRuns!().then((list) => setCi(ciByCommit(list)), () => {}), p.active ? 15000 : 30000)
+    return () => clearInterval(timer)
+  }, [ciPoll, p.active])
 
   const run = async (label: string, fn: () => Promise<unknown>, opts: { after?: (r: unknown) => void; statusOnly?: boolean } = {}) => {
     if (!view || busy) return
@@ -481,8 +503,9 @@ export function App(p: { be: Backend; name: string; active: boolean; theme: Them
       behind: cur?.behind ?? 0,
       busy: !!busy,
       agent: panel.state,
+      ci: ciState(headCi),
     })
-  }, [view, busy, panel.state])
+  }, [view, busy, panel.state, ciState(headCi)])
 
   const aiCommands = (): Command[] => {
     if (!p.be.ai) return []
@@ -578,7 +601,10 @@ export function App(p: { be: Backend; name: string; active: boolean; theme: Them
   }
 
   const afterPush = (r: PushResult | void, lease?: string) => {
-    if (!r || r.result === 'pushed') return setToast(lease ? 'Force push done' : 'Push done')
+    if (!r || r.result === 'pushed') {
+      setCiSoon(Date.now() + 120000)
+      return setToast(lease ? 'Force push done' : 'Push done')
+    }
     const n = (k: number) => `${k} commit${k === 1 ? '' : 's'}`
     const force = () => confirm(`Force pushing replaces ${head} on the remote and drops ${n(r.behind)} that only the remote has. Continue?`, () => pushHead(r.theirs))
     setDialog({ kind: 'diverged', branch: head!, ahead: r.ahead, behind: r.behind, push: true, rebase: integrate('rebase', true), merge: integrate('merge', true), force })
@@ -829,6 +855,19 @@ export function App(p: { be: Backend; name: string; active: boolean; theme: Them
       },
     })
   }
+
+  const ciMenu = (e: MouseEvent, runs: CiRun[]) =>
+    setMenu({
+      x: e.clientX,
+      y: e.clientY,
+      items: runs.map((r) => ({
+        label: `${r.workflow}: ${CI_WORD[r.state]}`,
+        onClick: () => {
+          const url = webUrl(r.url)
+          if (url) window.open(url, '_blank', 'noopener,noreferrer')
+        },
+      })),
+    })
 
   const pillDoubleClick = (pill: PillData) => {
     if (!view) return
@@ -1136,6 +1175,7 @@ export function App(p: { be: Backend; name: string; active: boolean; theme: Them
             return fail(`GitHub did not merge #${pr.number}`, e)
           }
           setToast(`Merged #${pr.number} on GitHub`)
+          setCiSoon(Date.now() + 120000)
           await v.be.fetchAll()
         })
       },
@@ -1293,6 +1333,8 @@ export function App(p: { be: Backend; name: string; active: boolean; theme: Them
             setLeftMode(v.rows[i].kind === 'wip' ? 'changes' : 'commit')
           }}
           onContextMenu={rowMenu}
+          ci={ci}
+          onCi={ciMenu}
           onPillDoubleClick={pillDoubleClick}
           onDrop={onDrop}
           onLoadMore={() => run('Loading more', async () => applyData(v.be, await v.be.load(v.limit + PAGE), v.limit + PAGE, false))}
