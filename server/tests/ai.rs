@@ -1,7 +1,7 @@
 mod common;
 use common::*;
 use ramulus::ai;
-use ramulus::term::trim_tail;
+use ramulus::term::{last_title, trim_tail};
 use serde_json::json;
 use std::time::{Duration, Instant};
 
@@ -68,6 +68,15 @@ fn keeps_a_bounded_replay_buffer_even_without_newlines() {
     assert_eq!(trim_tail(&"x".repeat(300), 100).len(), 100);
     assert_eq!(trim_tail(&format!("{}\n{}", "a".repeat(50), "b".repeat(80)), 100), "b".repeat(80));
     assert_eq!(trim_tail("short", 100), "short");
+}
+
+#[test]
+fn reads_the_title_a_program_gives_its_terminal() {
+    assert_eq!(last_title("\x1b]0;\u{2733} Claude Code\x07hello"), Some("\u{2733} Claude Code"));
+    assert_eq!(last_title("\x1b]2;first\x1b\\ \x1b]0;second\x07"), Some("second"));
+    assert_eq!(last_title("\x1b]0;unfinished"), None);
+    assert_eq!(last_title("\x1b]7501;?\x07\x1b]8;;link\x07"), None);
+    assert_eq!(last_title("\x1b]0;cut\x1b[0m\x07"), None);
 }
 
 #[tokio::test]

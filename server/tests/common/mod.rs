@@ -59,7 +59,7 @@ pub fn stub_agent(bin: &Path) {
     {
         use std::os::unix::fs::PermissionsExt;
         let f = bin.join("claude");
-        std::fs::write(&f, "#!/bin/sh\nif [ -n \"$FAIL\" ]; then echo '{\"error\":{\"message\":\"not signed in\"}}' >&2; exit 1; fi\nif [ -n \"$SHOWDIR\" ]; then pwd; exit 0; fi\nif [ -n \"$SLOW\" ]; then sleep 30; fi\ncat\n").unwrap();
+        std::fs::write(&f, "#!/bin/sh\nif [ -n \"$FAIL\" ]; then echo '{\"error\":{\"message\":\"not signed in\"}}' >&2; exit 1; fi\nif [ -n \"$SHOWDIR\" ]; then pwd; exit 0; fi\nif [ -n \"$SLOW\" ]; then sleep 30; fi\nif [ -n \"$SHOWARGS\" ]; then echo \"args:$*\"; fi\nif [ -n \"$TITLE\" ]; then printf '\\033]0;%s\\007' \"$TITLE\"; fi\ncat\n").unwrap();
         std::fs::set_permissions(&f, std::fs::Permissions::from_mode(0o755)).unwrap();
     }
 }

@@ -214,3 +214,17 @@ fn replays_what_a_terminal_printed_before_the_tab_attached() {
     let mut gone = srv.term_stream(s(&repo), "late");
     gone.until("event: exit\ndata: null");
 }
+
+#[test]
+fn opens_a_folder_without_git_and_starts_a_repository_in_it() {
+    let root = tmp("ramulus-srv-");
+    let plain = root.join("plain");
+    std::fs::create_dir_all(&plain).unwrap();
+    let srv = Server::start(config(None, &root, &root.join("state")));
+    let opened = srv.result("openRepo", json!({ "path": s(&plain) }));
+    assert_eq!(opened["name"], "plain");
+    let dir = opened["dir"].as_str().unwrap().to_string();
+    assert!(srv.error("load", json!({ "repo": dir })).contains("not a git repository"));
+    srv.result("init", json!({ "repo": dir }));
+    assert_eq!(srv.result("status", json!({ "repo": dir }))["unstaged"], json!([]));
+}

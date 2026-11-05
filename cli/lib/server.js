@@ -18,6 +18,7 @@ const termId = (id) => {
 
 const OPS = {
   load: (dir, b) => git.load(dir, b.limit),
+  init: async (dir) => void (await git.run(dir, ['init'])),
   files: (dir) => git.files(dir),
   prs: (dir) => pullRequests(dir),
   prMerge: (dir, b) => mergePullRequest(dir, b.number, b.method),
@@ -119,7 +120,7 @@ export function createServer({ dir, root = dir, uiDir, token, stateFile = STATE 
   const needAi = async () => {
     if ((await readAi()).enabled !== true) throw new Error('AI help is turned off')
   }
-  const terms = createTerminals()
+  const terms = createTerminals(join(dirname(stateFile), 'terms'))
   const ops = {
     ...OPS,
     aiContext: (repo, b) => git.aiContext(repo, b.task, { at: b.at }),
@@ -167,7 +168,11 @@ export function createServer({ dir, root = dir, uiDir, token, stateFile = STATE 
     openRepo: async (b) => {
       const path = resolve(dir ?? root, String(b.path ?? '').trim().replace(/^~(?=$|[/\\])/, homedir()))
       if (!existsSync(path) || !statSync(path).isDirectory()) throw new Error('That folder does not exist')
-      const top = await git.toplevel(path)
+      // a folder without git opens too, for its terminals and to start a repository in it
+      const top = await git.toplevel(path).catch((e) => {
+        if (/not a git repository/.test(e?.message ?? '')) return path
+        throw e
+      })
       known.add(top)
       await remember(top).catch(() => {})
       return info(top)
