@@ -3,6 +3,7 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, s
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { AGENTS, findBin } from './ai.js'
+import { createWake } from './wake.js'
 
 const WIN = process.platform === 'win32'
 const KEEP = 200000
@@ -10,6 +11,9 @@ const TITLE_MAX = 120
 const SAVE_EVERY = 2000
 // a helper saving more recently than this still runs, and keeps the saved tabs to itself
 const OWNER_FRESH = 6000
+// how often the helper looks for a working agent, and how long after its last output another agent still counts as working
+const WAKE_EVERY = 10000
+const QUIET = 60000
 // printed between a restored tab's old output and the program started again below it
 const RESTORED = '\x1b[?47l\x1b[!p\r\n\x1b[2m─── new session ───\x1b[0m\r\n'
 
@@ -45,6 +49,12 @@ const RESUME = { codex: (id) => ['resume', id], opencode: (id) => ['--session', 
 const writeAtomic = (file, text) => {
   writeFileSync(`${file}.tmp`, text)
   renameSync(`${file}.tmp`, file)
+}
+
+// Claude Code's title starts with ✳ when it waits for you and with a spinner while it works, as the app reads it too.
+export const claudeBusy = (title) => {
+  const m = typeof title === 'string' ? /^(\S)\s+\S/u.exec(title) : null
+  return !!m && !/[\p{L}\p{N}]/u.test(m[1]) && m[1] !== '✳'
 }
 
 // Claude Code saves a conversation under its id once the first message is sent.
@@ -131,6 +141,13 @@ export function createTerminals(dir) {
     setInterval(() => save(true), SAVE_EVERY).unref()
   }
 
+  // An agent at work keeps the computer awake: Claude Code by its title, the others while they keep printing.
+  const working = (now = Date.now()) =>
+    [...sessions.values()].some((s) => s.kind === 'agent' && s.proc && !s.exit && (s.agent === 'claude' ? claudeBusy(s.title) : now - (s.lastOutput ?? 0) < QUIET))
+  const wake = createWake()
+  const waking = setInterval(() => wake(working()), WAKE_EVERY)
+  waking.unref()
+
   // closes a tab for good: its program ends and its saved output goes
   const stopKey = (k) => {
     const s = sessions.get(k)
@@ -182,6 +199,7 @@ export function createTerminals(dir) {
         if (title !== undefined) s.title = cleanTitle(title)
         s.buf = trimTail(s.buf + d, KEEP)
         s.unsaved = true
+        s.lastOutput = Date.now()
         send(s, '', d)
       })
       proc.onExit(({ exitCode }) => {
@@ -212,6 +230,7 @@ export function createTerminals(dir) {
       }
       return { ids, since }
     },
+    working,
     attach(repo, id, res) {
       const s = sessions.get(key(repo, id))
       if (!s) {
@@ -239,6 +258,8 @@ export function createTerminals(dir) {
     },
     // saves every tab for the next run, then ends their programs: the helper shutting down, not tabs closing
     stopAll() {
+      clearInterval(waking)
+      wake(false)
       save(true)
       if (store) rmSync(join(dir, 'owner'), { force: true })
       store = false

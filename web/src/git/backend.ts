@@ -58,6 +58,12 @@ export interface AgentSession {
   title: string
   /** when it last changed, in ms */
   time: number
+  /** tokens the last request carried, out of the model's window when the agent records it */
+  context?: number
+  window?: number
+  /** every token of the conversation, and what it cost in USD, when the agent records them */
+  tokens?: number
+  cost?: number
 }
 
 export type MergeMethod = 'merge' | 'squash' | 'rebase'

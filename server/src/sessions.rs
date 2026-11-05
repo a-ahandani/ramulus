@@ -23,6 +23,21 @@ pub struct AgentSession {
     pub id: String,
     pub title: String,
     pub time: i64,
+    #[serde(flatten)]
+    pub usage: Usage,
+}
+
+/// What the last request carried, the model's window when the agent records it, every token of the conversation, and its cost in USD.
+#[derive(Serialize, Clone, Default, Debug, PartialEq)]
+pub struct Usage {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub context: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub window: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tokens: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cost: Option<f64>,
 }
 
 #[derive(Clone)]
@@ -31,6 +46,8 @@ struct Info {
     /// Codex's own id; Claude Code names the file after it
     id: String,
     title: Option<String>,
+    /// None until read: Codex's is read only for the folder's own conversations
+    usage: Option<Usage>,
 }
 
 /// What each session file held when it was last read, by path, with the size and time it had then.
@@ -58,6 +75,68 @@ fn lines(text: &str, cut_start: bool, cut_end: bool) -> Vec<Value> {
         .filter_map(|l| serde_json::from_str::<Value>(l).ok())
         .filter(|v| v.is_object() || v.is_array())
         .collect()
+}
+
+/// A token count as both helpers read it: a whole number, or nothing.
+fn count(v: Option<&Value>) -> Option<u64> {
+    v?.as_f64().filter(|f| *f >= 0.0 && f.fract() == 0.0).map(|f| f as u64)
+}
+
+/// The end of a file: the last CHUNK, or up to HEAD_MAX when `has` finds nothing there.
+fn tail(file: &Path, size: u64, has: fn(&Value) -> bool) -> Option<Vec<Value>> {
+    if size <= CHUNK {
+        return Some(lines(&read_at(file, 0, CHUNK).ok()?, false, false));
+    }
+    let end = lines(&read_at(file, size - CHUNK, CHUNK).ok()?, true, false);
+    if end.iter().any(has) {
+        return Some(end);
+    }
+    let at = size.saturating_sub(HEAD_MAX);
+    Some(lines(&read_at(file, at, HEAD_MAX).ok()?, at > 0, false))
+}
+
+fn claude_reply(o: &Value) -> bool {
+    str_at(o, &["type"]) == Some("assistant") && o.get("isSidechain") != Some(&Value::Bool(true)) && o.get("message").and_then(|m| m.get("usage")).is_some_and(Value::is_object)
+}
+
+/// What Claude Code's last request carried, and what the conversation has cost (a running total it writes as it goes).
+fn claude_usage(end: &[Value]) -> Usage {
+    let u = end.iter().rev().find(|o| claude_reply(o)).map(|o| &o["message"]["usage"]);
+    let context = u.map(|u| {
+        ["input_tokens", "cache_creation_input_tokens", "cache_read_input_tokens"]
+            .iter()
+            .map(|k| count(u.get(k)).unwrap_or(0))
+            .sum::<u64>()
+    });
+    let cost = end.iter().rev().find_map(|o| {
+        if str_at(o, &["type"]) == Some("cost-state") {
+            o.get("totalCostUSD")?.as_f64().filter(|c| *c >= 0.0)
+        } else {
+            None
+        }
+    });
+    Usage {
+        context: context.filter(|c| *c > 0),
+        // in cents, since the two helpers read the last digits of a long decimal differently
+        cost: cost.map(|c| (c * 100.0).round() / 100.0),
+        ..Default::default()
+    }
+}
+
+fn codex_count(o: &Value) -> bool {
+    str_at(o, &["type"]) == Some("event_msg") && str_at(o, &["payload", "type"]) == Some("token_count") && o["payload"].get("info").is_some_and(Value::is_object)
+}
+
+/// What Codex's last request carried, out of the model's window, and every token of the conversation.
+fn codex_usage(file: &Path, size: u64) -> Usage {
+    let end = tail(file, size, codex_count).unwrap_or_default();
+    let info = end.iter().rev().find(|o| codex_count(o)).map(|o| &o["payload"]["info"]);
+    Usage {
+        context: count(info.and_then(|i| i.get("last_token_usage")?.get("input_tokens"))),
+        window: count(info.and_then(|i| i.get("model_context_window"))),
+        tokens: count(info.and_then(|i| i.get("total_token_usage")?.get("total_tokens"))),
+        cost: None,
+    }
 }
 
 fn one_line(s: Option<&str>) -> Option<String> {
@@ -144,7 +223,7 @@ fn claude_running(base: &Path) -> Vec<String> {
 }
 
 /// Claude Code keeps a folder's conversations in one directory named after the folder, and names each one as it goes.
-fn claude(repo: &str, env: &Env) -> Vec<(&'static str, String, String, i64)> {
+fn claude(repo: &str, env: &Env) -> Vec<AgentSession> {
     let base = var(env, "CLAUDE_CONFIG_DIR")
         .filter(|v| !v.is_empty())
         .map(PathBuf::from)
@@ -170,14 +249,10 @@ fn claude(repo: &str, env: &Env) -> Vec<(&'static str, String, String, i64)> {
     for f in newest(files) {
         let info = cached(&f, |file, size| {
             let head = lines(&read_at(file, 0, CHUNK).ok()?, false, size > CHUNK);
-            let tail = if size > CHUNK {
-                lines(&read_at(file, size - CHUNK, CHUNK).ok()?, true, false)
-            } else {
-                vec![]
-            };
+            let end = tail(file, size, claude_reply)?;
             let titled = head
                 .iter()
-                .chain(&tail)
+                .chain(&end)
                 .rev()
                 .filter(|o| str_at(o, &["type"]) == Some("ai-title"))
                 .find_map(|o| str_at(o, &["aiTitle"]));
@@ -185,13 +260,23 @@ fn claude(repo: &str, env: &Env) -> Vec<(&'static str, String, String, i64)> {
                 cwd: head.iter().find_map(|o| str_at(o, &["cwd"]))?.to_string(),
                 id: String::new(),
                 title: one_line(titled).or_else(|| one_line(head.iter().find_map(user_text))),
+                usage: Some(claude_usage(&end)),
             })
         });
         let id = f.0.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
         // two folders can share a directory name, so the folder the conversation names decides
-        if let Some(Info { cwd, title: Some(title), .. }) = info {
+        if let Some(Info {
+            cwd, title: Some(title), usage, ..
+        }) = info
+        {
             if same(&cwd, repo) && !running.contains(&id) {
-                out.push(("claude", id, title, f.2));
+                out.push(AgentSession {
+                    agent: "claude",
+                    id,
+                    title,
+                    time: f.2,
+                    usage: usage.unwrap_or_default(),
+                });
             }
         }
         if out.len() >= MAX {
@@ -221,11 +306,12 @@ fn codex_info(file: &Path, size: u64) -> Option<Info> {
         cwd: str_at(&meta, &["cwd"])?.to_string(),
         id: str_at(&meta, &["id"])?.to_string(),
         title: one_line(asked.as_deref().and_then(|a| a.rsplit("## My request for Codex:").next())),
+        usage: None,
     })
 }
 
 /// Codex keeps every conversation by date and names some of them in an index beside them.
-fn codex(repo: &str, env: &Env) -> Vec<(&'static str, String, String, i64)> {
+fn codex(repo: &str, env: &Env) -> Vec<AgentSession> {
     let base = var(env, "CODEX_HOME").filter(|v| !v.is_empty()).map(PathBuf::from).unwrap_or_else(|| home().join(".codex"));
     let mut names: HashMap<String, Option<String>> = HashMap::new();
     for o in lines(&std::fs::read_to_string(base.join("session_index.jsonl")).unwrap_or_default(), false, false) {
@@ -249,9 +335,24 @@ fn codex(repo: &str, env: &Env) -> Vec<(&'static str, String, String, i64)> {
     let mut out = vec![];
     for f in newest(files) {
         let Some(info) = cached(&f, codex_info).filter(|i| same(&i.cwd, repo)) else { continue };
-        if let Some(title) = one_line(names.get(&info.id).and_then(|n| n.as_deref())).or(info.title) {
-            out.push(("codex", info.id, title, f.2));
-        }
+        let Some(title) = one_line(names.get(&info.id).and_then(|n| n.as_deref())).or(info.title) else {
+            continue;
+        };
+        // read once for each version of the file, and only for this folder's conversations
+        let usage = info.usage.unwrap_or_else(|| {
+            let u = codex_usage(&f.0, f.1);
+            if let Some((_, _, Some(i))) = CACHE.lock().unwrap().get_mut(&f.0) {
+                i.usage = Some(u.clone());
+            }
+            u
+        });
+        out.push(AgentSession {
+            agent: "codex",
+            id: info.id,
+            title,
+            time: f.2,
+            usage,
+        });
         if out.len() >= MAX {
             break;
         }
@@ -260,7 +361,7 @@ fn codex(repo: &str, env: &Env) -> Vec<(&'static str, String, String, i64)> {
 }
 
 /// opencode keeps its conversations in a database, so it is asked for them.
-async fn opencode(repo: String, env: Env) -> Vec<(&'static str, String, String, i64)> {
+async fn opencode(repo: String, env: Env) -> Vec<AgentSession> {
     let Some(bin) = find_bin("opencode", &env) else { return vec![] };
     let mut cmd = Command::new(bin);
     cmd.args(["session", "list", "--format", "json"]).current_dir(&repo).env_clear().envs(&env);
@@ -283,7 +384,13 @@ async fn opencode(repo: String, env: Env) -> Vec<(&'static str, String, String, 
             let title = one_line(str_at(s, &["title"]))?;
             str_at(s, &["directory"]).filter(|d| same(d, &repo))?;
             let time = s.get("updated").and_then(Value::as_f64).map(|t| t.floor() as i64).unwrap_or(0);
-            Some(("opencode", str_at(s, &["id"])?.to_string(), title, time))
+            Some(AgentSession {
+                agent: "opencode",
+                id: str_at(s, &["id"])?.to_string(),
+                title,
+                time,
+                usage: Usage::default(),
+            })
         })
         .collect()
 }
@@ -293,13 +400,12 @@ async fn opencode(repo: String, env: Env) -> Vec<(&'static str, String, String, 
 pub async fn agent_sessions(repo: &str, held: Held, env: &Env) -> Vec<AgentSession> {
     let asked = tokio::spawn(opencode(repo.to_string(), env.clone()));
     let on = |bin| find_bin(bin, env).is_some();
-    let mut all = [if on("claude") { claude(repo, env) } else { vec![] }, if on("codex") { codex(repo, env) } else { vec![] }].concat();
+    let mut all = if on("claude") { claude(repo, env) } else { vec![] };
+    if on("codex") {
+        all.extend(codex(repo, env));
+    }
     all.extend(asked.await.unwrap_or_default());
-    let mut all: Vec<AgentSession> = all
-        .into_iter()
-        .filter(|(agent, id, _, time)| valid_session_id(id) && !held.ids.contains(id) && held.since.get(*agent).is_none_or(|since| time < since))
-        .map(|(agent, id, title, time)| AgentSession { agent, id, title, time })
-        .collect();
+    all.retain(|s| valid_session_id(&s.id) && !held.ids.contains(&s.id) && held.since.get(s.agent).is_none_or(|since| s.time < *since));
     all.sort_by_key(|s| std::cmp::Reverse(s.time));
     all.truncate(MAX);
     all

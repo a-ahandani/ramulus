@@ -39,6 +39,39 @@ function lines(text, cutStart, cutEnd) {
   })
 }
 
+// a token count as both helpers read it: a whole number, or nothing
+const count = (n) => (Number.isInteger(n) && n >= 0 ? n : undefined)
+
+// the end of a file: the last CHUNK, or up to HEAD_MAX when `has` finds nothing there
+function tail({ file, size }, has) {
+  if (size <= CHUNK) return lines(readAt(file, 0, CHUNK), false, false)
+  const end = lines(readAt(file, size - CHUNK, CHUNK), true, false)
+  if (end.some(has)) return end
+  const at = Math.max(0, size - HEAD_MAX)
+  return lines(readAt(file, at, HEAD_MAX), at > 0, false)
+}
+
+// what Claude Code's last request carried, and what the conversation has cost (a running total it writes as it goes)
+const claudeReply = (o) => o.type === 'assistant' && !o.isSidechain && o.message?.usage && typeof o.message.usage === 'object'
+function claudeUsage(end) {
+  const u = end.findLast(claudeReply)?.message.usage
+  const context = u ? (count(u.input_tokens) ?? 0) + (count(u.cache_creation_input_tokens) ?? 0) + (count(u.cache_read_input_tokens) ?? 0) : undefined
+  const cost = end.findLast((o) => o.type === 'cost-state' && typeof o.totalCostUSD === 'number' && o.totalCostUSD >= 0)?.totalCostUSD
+  // in cents, since the two helpers read the last digits of a long decimal differently
+  return { context: context || undefined, cost: cost === undefined ? undefined : Math.round(cost * 100) / 100 }
+}
+
+// what Codex's last request carried, out of the model's window, and every token of the conversation
+const codexCount = (o) => o.type === 'event_msg' && o.payload?.type === 'token_count' && o.payload.info && typeof o.payload.info === 'object'
+function codexUsage(f) {
+  let end = []
+  try {
+    end = tail(f, codexCount)
+  } catch {}
+  const info = end.findLast(codexCount)?.payload.info
+  return { context: count(info?.last_token_usage?.input_tokens), window: count(info?.model_context_window), tokens: count(info?.total_token_usage?.total_tokens) }
+}
+
 const oneLine = (s) => (typeof s === 'string' ? cleanTitle(s.split(/[\t\n\r ]+/).filter(Boolean).join(' ')) : undefined)
 
 // the files that exist, with their size and last change, newest first
@@ -117,13 +150,13 @@ function claude(repo, env) {
   for (const f of newest(names.map((n) => join(dir, n)))) {
     const info = cached(f, ({ file, size }) => {
       const head = lines(readAt(file, 0, CHUNK), false, size > CHUNK)
-      const tail = size > CHUNK ? lines(readAt(file, size - CHUNK, CHUNK), true, false) : []
+      const end = tail({ file, size }, claudeReply)
       const cwd = head.find((o) => typeof o.cwd === 'string')?.cwd
-      const titled = [...head, ...tail].findLast((o) => o.type === 'ai-title' && typeof o.aiTitle === 'string')
-      return { cwd, title: oneLine(titled?.aiTitle) ?? oneLine(head.map(userText).find(Boolean)) }
+      const titled = [...head, ...end].findLast((o) => o.type === 'ai-title' && typeof o.aiTitle === 'string')
+      return { cwd, title: oneLine(titled?.aiTitle) ?? oneLine(head.map(userText).find(Boolean)), usage: claudeUsage(end) }
     })
     // two folders can share a directory name, so the folder the conversation names decides
-    if (same(info?.cwd, repo) && info.title && !running.has(basename(f.file, '.jsonl'))) out.push({ agent: 'claude', id: basename(f.file, '.jsonl'), title: info.title, time: f.time })
+    if (same(info?.cwd, repo) && info.title && !running.has(basename(f.file, '.jsonl'))) out.push({ agent: 'claude', id: basename(f.file, '.jsonl'), title: info.title, time: f.time, ...info.usage })
     if (out.length >= MAX) break
   }
   return out
@@ -166,7 +199,10 @@ function codex(repo, env) {
     const info = cached(f, codexInfo)
     if (!info || !same(info.cwd, repo)) continue
     const title = oneLine(names.get(info.id)) ?? info.prompt
-    if (title) out.push({ agent: 'codex', id: info.id, title, time: f.time })
+    if (!title) continue
+    // read once for each version of the file, and only for this folder's conversations
+    info.usage ??= codexUsage(f)
+    out.push({ agent: 'codex', id: info.id, title, time: f.time, ...info.usage })
     if (out.length >= MAX) break
   }
   return out
@@ -205,4 +241,5 @@ export async function agentSessions(repo, held, env = process.env) {
     .filter((s) => SESSION_ID.test(s.id) && !held.ids.has(s.id) && !(held.since.has(s.agent) && s.time >= held.since.get(s.agent)))
     .sort((a, b) => b.time - a.time)
     .slice(0, MAX)
+    .map((s) => Object.fromEntries(Object.entries(s).filter(([, v]) => v !== undefined)))
 }

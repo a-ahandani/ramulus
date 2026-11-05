@@ -1,4 +1,5 @@
 use crate::ai::{agent, find_bin};
+use crate::wake::Wake;
 use crate::{err, home, var, Env, Error, Result};
 use axum::response::sse::Event;
 use futures_core::Stream;
@@ -10,7 +11,7 @@ use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, Weak};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tokio::sync::broadcast;
 
 pub const KEEP: usize = 200_000;
@@ -19,6 +20,9 @@ const TITLE_MAX: usize = 120;
 const SAVE_EVERY: Duration = Duration::from_secs(2);
 /// A helper saving more recently than this still runs, and keeps the saved tabs to itself.
 const OWNER_FRESH: Duration = Duration::from_secs(6);
+/// How often the helper looks for a working agent, and how long after its last output another agent still counts as working.
+const WAKE_EVERY: Duration = Duration::from_secs(10);
+pub const QUIET: Duration = Duration::from_secs(60);
 /// Printed between a restored tab's old output and the program started again below it; it leaves a full-screen program's screen without moving the cursor.
 const RESTORED: &str = "\x1b[?47l\x1b[!p\r\n\x1b[2m─── new session ───\x1b[0m\r\n";
 
@@ -89,6 +93,7 @@ struct State {
     title: Option<String>,
     /// the output changed since it was last saved
     unsaved: bool,
+    last_output: Option<Instant>,
 }
 
 /// A terminal tab. It outlives its program: an ended or restored tab starts again as itself.
@@ -118,7 +123,13 @@ impl Session {
             uuid,
             resume: None,
             started: now_ms(),
-            state: Mutex::new(State { buf, exit, title, unsaved: true }),
+            state: Mutex::new(State {
+                buf,
+                exit,
+                title,
+                unsaved: true,
+                last_output: None,
+            }),
             tx: broadcast::channel(1024).0,
             master: Mutex::new(None),
             writer: Mutex::new(None),
@@ -224,6 +235,31 @@ pub struct Terminals {
     sessions: Sessions,
     seq: AtomicU64,
     store: Option<Arc<Store>>,
+    wake: Arc<Wake>,
+}
+
+/// An agent at work keeps the computer awake: Claude Code by its title, the others while they printed within `quiet`.
+fn working(sessions: &Sessions, quiet: Duration) -> bool {
+    sessions.lock().unwrap().values().any(|s| {
+        let st = s.state.lock().unwrap();
+        s.kind == "agent"
+            && st.exit.is_none()
+            && match s.agent.as_deref() {
+                Some("claude") => claude_busy(st.title.as_deref()),
+                _ => st.last_output.is_some_and(|t| t.elapsed() < quiet),
+            }
+    })
+}
+
+fn keep_awake(sessions: Weak<Mutex<HashMap<String, Arc<Session>>>>, wake: Arc<Wake>) {
+    std::thread::spawn(move || loop {
+        std::thread::sleep(WAKE_EVERY);
+        let Some(sessions) = sessions.upgrade() else {
+            wake.set(false);
+            return;
+        };
+        wake.set(working(&sessions, QUIET));
+    });
 }
 
 fn valid_uuid(s: &str) -> bool {
@@ -266,6 +302,15 @@ fn new_uuid() -> Result<String> {
     b[8] = (b[8] & 0x3f) | 0x80;
     let h: String = b.iter().map(|x| format!("{x:02x}")).collect();
     Ok(format!("{}-{}-{}-{}-{}", &h[..8], &h[8..12], &h[12..16], &h[16..20], &h[20..]))
+}
+
+/// Claude Code's title starts with ✳ when it waits for you and with a spinner while it works, as the app reads it too.
+pub fn claude_busy(title: Option<&str>) -> bool {
+    let Some(t) = title else { return false };
+    let mut chars = t.chars();
+    let Some(first) = chars.next().filter(|c| !c.is_whitespace()) else { return false };
+    let rest = chars.as_str();
+    rest.starts_with(char::is_whitespace) && !rest.trim_start().is_empty() && !first.is_alphanumeric() && first != '\u{2733}'
 }
 
 /// Whether Claude Code saved a conversation under this id, which it does once the first message is sent.
@@ -360,6 +405,7 @@ fn pump(mut reader: Box<dyn Read + Send>, s: &Session) {
         let mut st = s.state.lock().unwrap();
         st.buf.push_str(&text);
         st.unsaved = true;
+        st.last_output = Some(Instant::now());
         // a title can arrive split across reads, so look a little before this one too
         let mut from = st.buf.len().saturating_sub(text.len() + 256);
         while !st.buf.is_char_boundary(from) {
@@ -415,7 +461,9 @@ impl Terminals {
                     closed: Default::default(),
                 })
             }),
+            wake: Default::default(),
         };
+        keep_awake(Arc::downgrade(&t.sessions), t.wake.clone());
         if let Some(store) = &t.store {
             let text = std::fs::read_to_string(store.dir.join("index.json")).unwrap_or_default();
             let saved: Vec<Saved> = serde_json::from_str(&text).unwrap_or_default();
@@ -695,8 +743,14 @@ impl Terminals {
         self.save_index();
     }
 
+    /// Whether an agent tab is at work, counting the others as working when they printed within `quiet`.
+    pub fn working(&self, quiet: Duration) -> bool {
+        working(&self.sessions, quiet)
+    }
+
     /// Saves every tab for the next run, then ends their programs; this is the helper shutting down, not tabs closing.
     pub fn stop_all(&self) {
+        self.wake.set(false);
         if let Some(store) = &self.store {
             store.close(&self.sessions);
         }

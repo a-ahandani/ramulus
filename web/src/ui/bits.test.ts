@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { ago, cannotFastForward, ciByCommit, ciState, finished, mergedBranches, prsByBranch, settleLimited, termTitle, webUrl, wipTally } from './bits'
+import { ago, cannotFastForward, ciByCommit, ciState, finished, mergedBranches, prsByBranch, sessionMeta, settleLimited, termTitle, tokenCount, webUrl, wipTally } from './bits'
 
 describe('settleLimited', () => {
   it('never runs more than the limit at once and keeps results in order', async () => {
@@ -118,5 +118,18 @@ describe('wipTally', () => {
       ],
     })
     expect(tally).toEqual({ M: 1, A: 2, D: 1 })
+  })
+})
+
+describe('agent conversation stats', () => {
+  it('shortens token counts', () => {
+    expect([950, 1234, 163002, 999700, 2809339, 12_400_000].map(tokenCount)).toEqual(['950', '1.2K', '163K', '1.0M', '2.8M', '12M'])
+  })
+
+  it('says what each agent records, and nothing it does not', () => {
+    const time = Date.now() - 2 * 3600_000
+    expect(sessionMeta({ agent: 'claude', id: 'a', title: 't', time, context: 163002, cost: 19.413 }, 'Claude Code')).toBe('Claude Code · 163K context · $19.41 · 2h')
+    expect(sessionMeta({ agent: 'codex', id: 'b', title: 't', time, context: 117032, window: 258400, tokens: 2809339 }, 'Codex')).toBe('Codex · 117K / 258K context · 2.8M tokens · 2h')
+    expect(sessionMeta({ agent: 'opencode', id: 'c', title: 't', time, cost: 0 }, 'opencode')).toBe('opencode · 2h')
   })
 })

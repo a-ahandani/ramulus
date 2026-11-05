@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'preact/hooks'
 import { DEFAULT_PROMPTS, fillPrompt } from '../git/ai'
 import type { AgentSession, AiSettings, Backend, TermKind, TermTab } from '../git/backend'
 import { AgentTerminal } from './Ai'
-import { Icon, ago, clamp, finished, stored, termTitle } from './bits'
+import { AgentLogo, Icon, clamp, finished, sessionMeta, stored, termTitle } from './bits'
 import type { MenuState } from './Menu'
 import { Splitter } from './Splitter'
 
@@ -34,6 +34,8 @@ export function useAgentPanel(p: {
   /** the folder's agent conversations that no tab has open, and whether the History tab is the one showing */
   const [past, setPast] = useState<AgentSession[]>([])
   const [history, setHistory] = useState(false)
+  const [query, setQuery] = useState('')
+  const search = useRef<HTMLInputElement>(null)
   const termsRef = useRef(terms)
   termsRef.current = terms
 
@@ -90,9 +92,15 @@ export function useAgentPanel(p: {
 
   const resume = (s: AgentSession) => {
     setPast((ps) => ps.filter((x) => x !== s))
+    setQuery('')
     add('agent', s.agent, s.id)
   }
   const agentName = (id: string) => p.agents.find((a) => a.id === id)?.name ?? id
+  const words = query.trim().toLowerCase().split(/\s+/).filter(Boolean)
+  const found = past.filter((s) => words.every((w) => `${s.title} ${agentName(s.agent)}`.toLowerCase().includes(w)))
+  useEffect(() => {
+    if (history && shown && p.active) search.current?.focus()
+  }, [history, shown, p.active])
 
   const openAgent = async (conflictFile?: string) => {
     const picked = await p.pickAgent().catch((e) => void p.say(e))
@@ -194,7 +202,7 @@ export function useAgentPanel(p: {
               onClick={() => show(t.id)}
               onKeyDown={(e) => (e.key === 'Enter' || e.key === ' ') && show(t.id)}
             >
-              <Icon name={t.kind === 'shell' ? 'terminal' : termTitle(t).busy ? 'loading' : 'sparkle'} />
+              {t.kind === 'shell' || termTitle(t).busy ? <Icon name={t.kind === 'shell' ? 'terminal' : 'loading'} /> : <AgentLogo agent={t.agent} />}
               <span class="label">{label(t)}</span>
               <button
                 class="icon"
@@ -245,19 +253,34 @@ export function useAgentPanel(p: {
       </div>
       {history || !activeTerm ? (
         <div class="past" role="tabpanel" aria-label="Agent conversations to resume">
-          {past.length ? (
-            past.map((s) => (
-              <button key={`${s.agent} ${s.id}`} class="past-row" title={`Resume this ${agentName(s.agent)} conversation in a new tab`} onClick={() => resume(s)}>
-                <Icon name="sparkle" />
-                <span class="past-title">{s.title}</span>
-                <span class="past-meta">
-                  {agentName(s.agent)} · {ago(Math.floor(s.time / 1000))}
-                </span>
-              </button>
-            ))
-          ) : (
-            <div class="past-empty">No other agent conversations in this folder.</div>
+          {past.length > 0 && (
+            <div class="past-search">
+              <input
+                ref={search}
+                placeholder="Search conversations"
+                aria-label="Search conversations"
+                value={query}
+                onInput={(e) => setQuery((e.target as HTMLInputElement).value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && found[0]) resume(found[0])
+                  if (e.key === 'Escape' && query) {
+                    e.stopPropagation()
+                    setQuery('')
+                  }
+                }}
+              />
+            </div>
           )}
+          <div class="past-list">
+            {found.map((s) => (
+              <button key={`${s.agent} ${s.id}`} class="past-row" title={`Resume this ${agentName(s.agent)} conversation in a new tab`} onClick={() => resume(s)}>
+                <AgentLogo agent={s.agent} />
+                <span class="past-title">{s.title}</span>
+                <span class="past-meta">{sessionMeta(s, agentName(s.agent))}</span>
+              </button>
+            ))}
+            {!found.length && <div class="past-empty">{past.length ? 'No conversation matches that.' : 'No other agent conversations in this folder.'}</div>}
+          </div>
         </div>
       ) : (
       <AgentTerminal

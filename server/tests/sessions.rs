@@ -52,12 +52,22 @@ fn lists_and_resumes_the_conversations_held_in_a_folder() {
     let claude = root.join("claude");
     let projects = claude.join("projects").join(r.replace(|c: char| !c.is_ascii_alphanumeric(), "-"));
     let user = |content: Value| json!({ "type": "user", "cwd": r, "message": { "role": "user", "content": content } });
+    let reply = |usage: Value, side: bool| json!({ "type": "assistant", "isSidechain": side, "message": { "role": "assistant", "usage": usage } });
     file(
         &projects.join(format!("{C1}.jsonl")),
         &[
             json!({ "type": "mode" }),
             user(json!("fix the\nlogin")),
             json!({ "type": "ai-title", "aiTitle": "Old name" }),
+            reply(json!({ "input_tokens": 9, "cache_read_input_tokens": 9 }), false),
+            json!({ "type": "cost-state", "totalCostUSD": 0.5 }),
+            reply(
+                json!({ "input_tokens": 2, "cache_creation_input_tokens": 1000, "cache_read_input_tokens": 162000, "output_tokens": 500 }),
+                false,
+            ),
+            // a subagent's request is not what the conversation carries
+            reply(json!({ "input_tokens": 7 }), true),
+            json!({ "type": "cost-state", "totalCostUSD": 19.41 }),
             json!({ "type": "ai-title", "aiTitle": "Login fix" }),
         ],
         secs(9000),
@@ -93,11 +103,15 @@ fn lists_and_resumes_the_conversations_held_in_a_folder() {
     let day = root.join("codex/sessions/2026/11/05");
     let meta = |id: &str, source: Value| json!({ "type": "session_meta", "payload": { "id": id, "cwd": r, "source": source, "timestamp": "2026-11-05T10:00:00Z" } });
     let asked = |m: &str| json!({ "type": "event_msg", "payload": { "type": "user_message", "message": m } });
+    let counted = |input: u64, total: u64| json!({ "type": "event_msg", "payload": { "type": "token_count", "info": { "total_token_usage": { "total_tokens": total }, "last_token_usage": { "input_tokens": input }, "model_context_window": 258400 } } });
     file(
         &day.join(format!("rollout-a-{X1}.jsonl")),
         &[
             meta(X1, json!("cli")),
             asked("# Context from my IDE setup:\n\n## Open tabs:\n- a.ts\n## My request for Codex:\nRename the button"),
+            counted(5000, 6000),
+            counted(117032, 2809339),
+            json!({ "type": "event_msg", "payload": { "type": "token_count", "info": null } }),
         ],
         secs(7000),
     );
@@ -124,9 +138,9 @@ fn lists_and_resumes_the_conversations_held_in_a_folder() {
     assert_eq!(
         srv.result("agentSessions", json!({})),
         json!([
-            { "agent": "claude", "id": C1, "title": "Login fix", "time": 9_000_000 },
+            { "agent": "claude", "id": C1, "title": "Login fix", "time": 9_000_000, "context": 163002, "cost": 19.41 },
             { "agent": "claude", "id": C2, "title": "add tests please", "time": 8_000_000 },
-            { "agent": "codex", "id": X1, "title": "Rename the button", "time": 7_000_000 },
+            { "agent": "codex", "id": X1, "title": "Rename the button", "time": 7_000_000, "context": 117032, "window": 258400, "tokens": 2809339 },
             { "agent": "codex", "id": X2, "title": "Named thread", "time": 6_000_000 },
             { "agent": "opencode", "id": "ses_abc", "title": "Tidy the docs", "time": 5_000_000 },
         ])
@@ -158,4 +172,33 @@ fn lists_and_resumes_the_conversations_held_in_a_folder() {
         .error("termStart", json!({ "id": "e", "agent": "claude", "resume": "not-a-uuid", "cols": 80, "rows": 24 }))
         .contains("cannot be resumed"));
     srv.app.stop_agents();
+}
+
+#[test]
+fn an_agent_at_work_keeps_the_computer_awake() {
+    use ramulus::term::{claude_busy, Terminals, QUIET};
+    let busy: Vec<bool> = [Some("◐ Fix the login"), Some("✳ Fix the login"), Some("Claude Code"), Some("✳"), None]
+        .into_iter()
+        .map(claude_busy)
+        .collect();
+    assert_eq!(busy, [true, false, false, false, false]);
+
+    let root = tmp("ramulus-wake-");
+    let bin = root.join("bin");
+    std::fs::create_dir_all(&bin).unwrap();
+    stub(&bin, "codex", "echo working\ncat\n");
+    let terms = Terminals::new(None);
+    let env = env_with_path(&bin);
+    assert!(!terms.working(QUIET));
+    terms.start(s(&root), "w", "agent", "codex", Some(80), Some(24), None, &env).unwrap();
+    for _ in 0..50 {
+        if terms.working(QUIET) {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    // it just printed, so it counts as working until it has been quiet for a while
+    assert!(terms.working(QUIET));
+    assert!(!terms.working(Duration::ZERO));
+    terms.stop_all();
 }
