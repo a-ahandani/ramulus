@@ -18,9 +18,9 @@
   --muted: rgba(0, 0, 0, 0.62);
   --line: rgba(0, 0, 0, 0.12);
   --chip: #f4f4f5;
-  --accent: #eda220;
-  --badge-bg: #fbecd2;
-  --badge-ink: #8e6113;
+  --accent: #d13667;
+  --badge-bg: #f6d7e1;
+  --badge-ink: #731e39;
   --serif: 'Libre Clarendon', Georgia, serif;
   --mono: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
   --pad: clamp(20px, 4vw, 48px);
