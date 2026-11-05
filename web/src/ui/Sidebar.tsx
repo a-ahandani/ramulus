@@ -96,7 +96,7 @@ export function Sidebar(p: {
     peekTimer.current = setTimeout(() => setPeek(undefined), 200)
   }
 
-  // a repository dragged by the pointer, so it works in the desktop window too; it stays among the pinned or the open ones
+  // a repository dragged by the pointer, so it works in the desktop window too; it stays among the pinned or the open ones (Alt+arrows from the keyboard)
   const startDrag = (t: SideTab, e: PointerEvent) => {
     if (e.button !== 0 || q) return
     const y0 = e.clientY
@@ -175,7 +175,17 @@ export function Sidebar(p: {
   const step = (e: KeyboardEvent) => {
     const mains = [...(list.current?.querySelectorAll<HTMLElement>('.sb-main') ?? [])]
     const i = mains.findIndex((m) => m.parentElement?.contains(document.activeElement))
-    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+    const focused = p.tabs.find((t) => t.id === Number((document.activeElement as HTMLElement | null)?.closest<HTMLElement>('.sb-item[data-tab]')?.dataset.tab))
+    if (e.altKey && focused && !q && (e.key === 'ArrowDown' || e.key === 'ArrowUp')) {
+      // Alt+arrows reorder, the keyboard's drag
+      e.preventDefault()
+      const section = focused.pinned ? pinned : open
+      const down = e.key === 'ArrowDown'
+      const next = section[section.indexOf(focused) + (down ? 1 : -1)]
+      if (!next) return
+      p.onMove(focused.id, next.id, down)
+      requestAnimationFrame(() => list.current?.querySelector<HTMLElement>(`.sb-item[data-tab="${focused.id}"] .sb-main`)?.focus())
+    } else if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
       e.preventDefault()
       const next = i + (e.key === 'ArrowDown' ? 1 : -1)
       if (next < 0) input.current?.focus()

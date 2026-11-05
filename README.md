@@ -54,7 +54,7 @@ Ramulus is Latin for a small branch.
 - Pull all (fast-forward only) and Fetch all update every open repository, three at a time so the app stays responsive.
 - Branches with a pull request on GitHub show its number. Click it to open the pull request in Ramulus: description with its images and videos, checks (refreshing while they run), and one timeline of comments, reviews and review threads, each thread shown with the lines of code it is about, with GitHub's Merge options (merge commit, squash, rebase). Resolved threads and bot comments fold away. It all goes through the GitHub CLI (`gh`) you are already signed in to, what GitHub sends is sanitized, media loads only from GitHub's own hosts so tracking pixels stay out, and Ramulus fetches after a merge so it shows in the graph.
 - Rebase with uncommitted changes: they are stashed and put back for you, and the rebase can be undone afterwards. A rejected push offers rebase, merge or a safe force push instead of an error.
-- Drag a project in the sidebar to reorder it. Rest the pointer on one to see its agent and terminal tabs, and click one to jump straight to it.
+- Drag a project in the sidebar to reorder it, or press ⌥↑ and ⌥↓. Rest the pointer on one to see its agent and terminal tabs, and click one to jump straight to it.
 - A folder without git opens too, with its terminals and agent, and a button to start a repository in it.
 - Quit and reopen Ramulus and you are where you left off: the same projects in the same order, each terminal tab with what it printed, and every Claude Code tab resuming its own conversation.
 - Only the visible tab watches its folder, so hidden tabs cost nothing and catch up when you come back.
@@ -78,6 +78,7 @@ Ramulus is Latin for a small branch.
 | `⌘⇧P` | Command palette: every action, branch and tag |
 | `⌘F` | Search commits |
 | `⌘⇧A` | Search open and recent repositories |
+| `⌥↑` / `⌥↓` | Move a project in the sidebar |
 | `↑` `↓` or `J` `K` | Move through commits |
 | `⌘⏎` | Commit |
 | `⌘⇧S` / `⌘⇧U` | Stage / unstage everything |
@@ -88,7 +89,7 @@ Ramulus is Latin for a small branch.
 | `` ⌃` `` | Show or hide the agent panel |
 | `?` | All shortcuts |
 
-Use Ctrl instead of ⌘ on Windows and Linux.
+Use Ctrl instead of ⌘, and Alt instead of ⌥, on Windows and Linux.
 
 ## Other ways to run it
 

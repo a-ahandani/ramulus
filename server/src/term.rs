@@ -217,12 +217,6 @@ pub struct Terminals {
     store: Option<Arc<Store>>,
 }
 
-impl Default for Terminals {
-    fn default() -> Self {
-        Terminals::new(None)
-    }
-}
-
 fn valid_uuid(s: &str) -> bool {
     s.len() == 36 && s.chars().all(|c| c.is_ascii_hexdigit() || c == '-')
 }

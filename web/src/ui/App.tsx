@@ -264,15 +264,12 @@ export function App(p: { be: Backend; name: string; active: boolean; theme: Them
     if (noGit) p.onSummary({ branch: '', changes: 0, ahead: 0, behind: 0, busy: false, noGit })
   }, [noGit])
 
-  // a folder without git becomes a repository when someone runs git init in it, here or anywhere
+  // a folder without git becomes a repository once git init runs in it, here or anywhere;
+  // checking now and then, because watching a big plain folder such as ~ costs far more
   useEffect(() => {
-    if (!noGit || !p.active || !p.be.subscribe) return
-    let timer: ReturnType<typeof setTimeout> | undefined
-    const stop = p.be.subscribe(() => {
-      clearTimeout(timer)
-      timer = setTimeout(() => p.be.load(PAGE).then((d) => (setNoGit(false), applyData(p.be, d, PAGE, true)), () => {}), 300)
-    })
-    return () => (clearTimeout(timer), stop())
+    if (!noGit || !p.active) return
+    const timer = setInterval(() => p.be.load(PAGE).then((d) => (setNoGit(false), applyData(p.be, d, PAGE, true)), () => {}), 3000)
+    return () => clearInterval(timer)
   }, [noGit, p.active])
 
   useEffect(() => {

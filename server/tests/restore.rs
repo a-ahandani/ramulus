@@ -36,6 +36,8 @@ fn brings_terminal_tabs_back_after_the_helper_restarts() {
     let mut sh = srv.term_stream(s(&repo), "sh");
     srv.result("termInput", json!({ "id": "sh", "data": "echo kept-$((40+2))\r" }));
     sh.until("kept-42");
+    // a second helper beside this one leaves its saved tabs alone
+    assert_eq!(start().result("termList", json!({})), json!([]));
     srv.result("termStart", json!({ "id": "ai", "agent": "claude", "cols": 80, "rows": 24 }));
     let mut ai = srv.term_stream(s(&repo), "ai");
     ai.until("args:--session-id ");

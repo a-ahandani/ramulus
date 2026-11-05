@@ -45,6 +45,8 @@ describe('terminals', () => {
     const seen = watch(first, 'sh')
     first.write(root, 'sh', 'printf "\\033]0;%s\\007" titled; echo kept-$((40+2))\r')
     await seen('kept-42')
+    // a second helper beside this one leaves its saved tabs alone
+    assert.deepEqual(createTerminals(dir).list(root), [])
     assert.deepEqual(first.list(root), [{ id: 'sh', kind: 'shell', agent: undefined, title: 'titled' }])
     first.stopAll()
 

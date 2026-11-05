@@ -486,7 +486,8 @@ select {
 
 .shell > .splitter {
   position: relative;
-  z-index: 3;
+  /* above the docked sidebar it overlaps */
+  z-index: 31;
   flex: none;
   width: 5px;
 }
