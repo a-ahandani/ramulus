@@ -314,7 +314,7 @@ export function GraphView(p: GraphProps) {
   const showWhen = width >= 660
   const showSha = width >= 820
   const refsW = Math.round(Math.min(240, Math.max(110, width * 0.18)))
-  const cols = [`${refsW}px`, `${graphW}px`, 'minmax(0, 1fr)', '36px', ...(showWhen ? ['56px'] : []), ...(showSha ? ['72px'] : [])].join(' ')
+  const cols = [`${refsW}px`, `${graphW}px`, 'minmax(0, 1fr)', ...(showWhen ? ['56px'] : []), ...(showSha ? ['72px'] : [])].join(' ')
   const items: JSX.Element[] = []
   for (let i = start; i < end; i++) {
     const top = i * ROW_H
@@ -360,7 +360,6 @@ export function GraphView(p: GraphProps) {
         <div class={`msg ${c.kind}`} title={c.kind === 'wip' ? undefined : `${c.summary}\n${c.author} · ${fmtDate(c.time)} · ${short(c.id)}`}>
           {c.kind === 'wip' ? `Uncommitted changes · ${p.wipCount} file${p.wipCount === 1 ? '' : 's'}` : c.summary}
         </div>
-        <div class="author">{c.kind !== 'wip' && <Avatar name={c.author} email={c.email} color={color} size={24} />}</div>
         {showWhen && (
           <div class="date" title={c.kind !== 'wip' ? fmtDate(c.time) : undefined}>
             {c.kind !== 'wip' && ago(c.time, true)}
@@ -383,7 +382,6 @@ export function GraphView(p: GraphProps) {
             </span>
           )}
         </div>
-        <div></div>
         {showWhen && <div>WHEN</div>}
         {showSha && <div>SHA</div>}
       </div>

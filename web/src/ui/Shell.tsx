@@ -7,7 +7,7 @@ import { helperShell, httpBackend, type RepoInfo } from '../git/remote'
 import { localBackend } from '../git/repo'
 import { isScheme, schemeVars, type Scheme } from '../git/scheme'
 import { App, loadSettings, type TabApi, type Theme } from './App'
-import { BrandLinks, BrandMark, Icon, SidebarToggle, settleLimited } from './bits'
+import { BrandLinks, BrandMark, Icon, cannotFastForward, settleLimited } from './bits'
 import { Dialogs, type Dialog } from './Dialogs'
 import { Menu, type MenuState } from './Menu'
 import { Palette, type Command } from './Palette'
@@ -33,7 +33,7 @@ let nextId = 1
 
 function reason(e: unknown): string {
   const text = e instanceof Error ? e.message : String(e)
-  if (/Not possible to fast-forward|Diverging branches/i.test(text)) return 'has local commits the remote does not have, so it cannot fast-forward. Pull it on its own to merge or rebase.'
+  if (cannotFastForward(text)) return 'has local commits the remote does not have, so it cannot fast-forward. Pull it on its own to merge or rebase.'
   if (/no tracking information|no upstream/i.test(text)) return 'its branch has no upstream to pull from.'
   if (/No remote repository specified|does not appear to be a git repository|No such remote/i.test(text)) return 'it has no remote.'
   if (/would be overwritten/i.test(text)) return 'local changes would be overwritten. Commit or stash them first.'
@@ -63,7 +63,7 @@ const fallbackAuthor = () => {
 const keepsSidebar = () => !!document.querySelector('.sidebar :focus-visible')
 
 const ALL_AT_ONCE = 3
-const sameSummary = (a: RepoSummary | undefined, b: RepoSummary) => !!a && a.branch === b.branch && a.changes === b.changes && a.ahead === b.ahead && a.behind === b.behind && a.busy === b.busy && a.noGit === b.noGit
+const sameSummary = (a: RepoSummary | undefined, b: RepoSummary) => !!a && a.branch === b.branch && a.changes === b.changes && a.ahead === b.ahead && a.behind === b.behind && a.busy === b.busy && a.noGit === b.noGit && a.agent === b.agent
 const isMergeMethod = (m: unknown): m is MergeMethod => m === 'merge' || m === 'squash' || m === 'rebase'
 
 export function Shell() {
@@ -421,8 +421,6 @@ export function Shell() {
               onSummary={(s) => setSummaries((m) => (sameSummary(m[t.id], s) ? m : { ...m, [t.id]: s }))}
               mergeMethod={mergeMethod}
               onMergeMethod={setMergeMethod}
-              sidebar={docked}
-              onToggleSidebar={toggleDock}
             />
           </div>
         ))}
@@ -435,7 +433,6 @@ export function Shell() {
               </div>
               <div />
               <div class="tb-side tb-end">
-                <SidebarToggle on={docked} onToggle={toggleDock} />
                 <BrandLinks />
               </div>
             </div>

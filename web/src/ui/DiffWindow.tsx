@@ -1,8 +1,10 @@
 import { useEffect, useRef, useState } from 'preact/hooks'
 import type { Backend, FileVersions, PrChange, PullRequest } from '../git/backend'
 import { mixedEol } from '../git/chunk'
+import type { FileChange, WorkStatus } from '../git/repo'
 import { Icon, PR_ICON, short } from './bits'
 import { PrView } from './PrView'
+import { ReviewPane } from './Review'
 import type { FileSel } from './DetailPanel'
 import { DiffEditor, FileEditor, type ChunkAction, type DiffEditorHandle, type DiffMode } from './DiffEditor'
 
@@ -18,6 +20,8 @@ export interface DiffTab {
   dirty: boolean
   file?: boolean
   pr?: PullRequest
+  /** every change of sel.area in one scrolling list */
+  review?: boolean
 }
 
 type PaneHandle = DiffEditorHandle & { save: () => void }
@@ -134,6 +138,10 @@ export function DiffWindow(p: {
   onOpen?: (sel: FileSel) => void
   onMergePr?: (pr: PullRequest) => void
   onChangePr?: (pr: PullRequest, action: PrChange) => void
+  status: WorkStatus
+  onOpenFile: (sel: FileSel) => void
+  onStage: (files: FileChange[]) => void
+  onUnstage: (paths: string[]) => void
   busy: boolean
 }) {
   const [max, setMax] = useState(false)
@@ -171,12 +179,12 @@ export function DiffWindow(p: {
         </div>
         <div class="tab-strip" ref={strip}>
           {p.tabs.map((t) => {
-            const name = t.pr ? `#${t.pr.number}` : t.sel.path.slice(t.sel.path.lastIndexOf('/') + 1)
+            const name = t.pr ? `#${t.pr.number}` : t.review ? 'Review' : t.sel.path.slice(t.sel.path.lastIndexOf('/') + 1)
             return (
               <div
                 key={t.key}
                 class={`tab ${live(t.key) ? 'active' : ''} ${t.dirty ? 'dirty' : ''}`}
-                title={t.pr ? t.pr.title : t.file ? t.sel.path : `${t.sel.path} (${describe(t.sel)})`}
+                title={t.pr ? t.pr.title : t.file ? t.sel.path : t.review ? `Every change (${describe(t.sel)})` : `${t.sel.path} (${describe(t.sel)})`}
                 role="tab"
                 tabIndex={0}
                 aria-selected={live(t.key)}
@@ -192,7 +200,7 @@ export function DiffWindow(p: {
                   p.onCloseTab(t.key)
                 }}
               >
-                <Icon name={t.pr ? PR_ICON[t.pr.state] : t.file ? 'file' : 'diff'} />
+                <Icon name={t.pr ? PR_ICON[t.pr.state] : t.file ? 'file' : t.review ? 'diff-multiple' : 'diff'} />
                 <span class="name">{name}</span>
                 {t.pr ? <span class="desc">{t.pr.title}</span> : !t.file && <span class="desc">({describe(t.sel)})</span>}
                 <button
@@ -220,12 +228,12 @@ export function DiffWindow(p: {
               <Icon name="save" />
             </button>
           )}
-          {p.onOpen && current.sel.area.kind !== 'commit' && !current.pr && (
+          {p.onOpen && current.sel.area.kind !== 'commit' && !current.pr && !current.review && (
             <button class="icon" title="Open File" onClick={() => p.onOpen!(current.sel)}>
               <Icon name="go-to-file" />
             </button>
           )}
-          {!current.file && !current.pr && (
+          {!current.file && !current.pr && !current.review && (
             <>
               <button class="icon" title="Previous Change" onClick={() => h()?.prev()}>
                 <Icon name="arrow-up" />
@@ -236,6 +244,10 @@ export function DiffWindow(p: {
               <button class={`icon ${p.options.collapse ? 'on' : ''}`} title="Collapse Unchanged Regions" onClick={() => toggle('collapse')}>
                 <Icon name="fold" />
               </button>
+            </>
+          )}
+          {!current.file && !current.pr && (
+            <>
               <button class={`icon ${p.options.mode === 'inline' ? 'on' : ''}`} title="Toggle Inline View" onClick={() => p.onOptions({ ...p.options, mode: p.options.mode === 'split' ? 'inline' : 'split' })}>
                 <Icon name="diff-single" />
               </button>
@@ -255,7 +267,7 @@ export function DiffWindow(p: {
           </button>
         </div>
       </div>
-      {!current.pr && (
+      {!current.pr && !current.review && (
         <div class="breadcrumbs">
           {parts.map((s, i) => (
             <span key={i} class="crumb">
@@ -270,6 +282,23 @@ export function DiffWindow(p: {
         t.pr ? (
           <div key={t.key} class="diff-pane" hidden={!live(t.key)}>
             <PrView be={p.be} pr={t.pr} active={p.shown && live(t.key)} stamp={p.stamp} busy={p.busy} onMerge={p.onMergePr} onChange={p.onChangePr} />
+          </div>
+        ) : t.review ? (
+          <div key={t.key} class="diff-pane" hidden={!live(t.key)}>
+            <ReviewPane
+              be={p.be}
+              stamp={p.stamp}
+              active={p.shown && live(t.key)}
+              area={t.sel.area}
+              status={p.status}
+              mode={p.options.mode}
+              look={p.look}
+              wrap={p.options.wrap}
+              actionsFor={p.actionsFor}
+              onOpenFile={p.onOpenFile}
+              onStage={p.onStage}
+              onUnstage={p.onUnstage}
+            />
           </div>
         ) : (
         <DiffPane

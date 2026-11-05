@@ -1,17 +1,18 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'preact/hooks'
-import { DEFAULT_PROMPTS, branchName, fillPrompt, splitMessage } from '../git/ai'
-import type { AiInfo, AiSettings, Backend, MergeMethod, PrChange, PullMode, PullRequest, PushResult, RebaseResult, RemoteSwitch, TermKind, TermTab } from '../git/backend'
+import { DEFAULT_PROMPTS, branchName, splitMessage } from '../git/ai'
+import type { AiInfo, AiSettings, Backend, MergeMethod, PrChange, PullMode, PullRequest, PushResult, RebaseResult, RemoteSwitch } from '../git/backend'
 import { layout, type RowLayout } from '../git/graph'
 import { PAGE, type Commit, type DiffArea, type FileChange, type NetSettings, type RepoData } from '../git/repo'
 import type { Scheme } from '../git/scheme'
-import { AgentTerminal, AiConsent, AiSettingsDialog } from './Ai'
-import { BrandLinks, BrandMark, Icon, SidebarToggle, laneColor, prsByBranch, short, termTitle } from './bits'
+import { AiConsent, AiSettingsDialog } from './Ai'
+import { useAgentPanel } from './AgentPanel'
+import { BrandMark, Icon, cannotFastForward, clamp, laneColor, mergedBranches, prsByBranch, short, stored } from './bits'
 import { DetailPanel, type FileSel } from './DetailPanel'
 import { PrCard } from './PrView'
 import { DiffWindow, tabKey, type DiffOptions, type DiffTab } from './DiffWindow'
 import type { ChunkAction } from './DiffEditor'
 import { Dialogs, type Dialog } from './Dialogs'
-import { GraphView, type DropInfo, type PillData } from './GraphView'
+import { GraphView, groupPills, type DropInfo, type PillData } from './GraphView'
 import { LeftPanel, type LeftMode } from './LeftPanel'
 import { Menu, type MenuItem, type MenuState } from './Menu'
 import { Palette, type Command } from './Palette'
@@ -33,9 +34,7 @@ type Sel = { kind: 'wip' } | { kind: 'commit'; oid: string }
 
 const WIP = '0000000000000000000000000000000000000000'
 const SETTINGS_KEY = 'ramulus.net'
-const PAGE_TAG = Date.now().toString(36)
 const CHANGE_LABEL: Record<PrChange, [string, string]> = { draft: ['Marking as draft', 'is a draft now'], ready: ['Marking ready for review', 'is ready for review'], close: ['Closing', 'is closed'], reopen: ['Reopening', 'is open again'] }
-const stored = (key: string) => (typeof localStorage === 'undefined' ? null : localStorage.getItem(key))
 
 function buildView(be: Backend, data: RepoData, limit: number): View {
   const rows: Commit[] = [...data.commits]
@@ -74,10 +73,6 @@ function saveSettings(s: NetSettings) {
   sessionStorage.setItem(SETTINGS_KEY + '.token', token)
 }
 
-const clamp = (n: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, n))
-
-const PULL_MODES: Record<PullMode, string> = { merge: 'Merge', 'ff-only': 'Fast-forward only', rebase: 'Rebase' }
-
 export interface TabApi {
   pull: () => Promise<void>
   fetch: () => Promise<void>
@@ -86,7 +81,7 @@ export interface TabApi {
 
 const notGit = (e: unknown) => /not a git repository/i.test(e instanceof Error ? e.message : String(e))
 
-export function App(p: { be: Backend; name: string; active: boolean; theme: Theme; onTheme: (t: Theme) => void; scheme?: Scheme; onScheme: (s?: Scheme) => void; onOpenRepo: () => void; onDirty: (dirty: boolean) => void; onApi: (api: TabApi) => void; onSearchRepos: () => void; onAll: (kind: 'pull' | 'fetch') => void; mergeMethod: MergeMethod; onMergeMethod: (m: MergeMethod) => void; onSummary: (s: RepoSummary) => void; sidebar: boolean; onToggleSidebar: () => void }) {
+export function App(p: { be: Backend; name: string; active: boolean; theme: Theme; onTheme: (t: Theme) => void; scheme?: Scheme; onScheme: (s?: Scheme) => void; onOpenRepo: () => void; onDirty: (dirty: boolean) => void; onApi: (api: TabApi) => void; onSearchRepos: () => void; onAll: (kind: 'pull' | 'fetch') => void; mergeMethod: MergeMethod; onMergeMethod: (m: MergeMethod) => void; onSummary: (s: RepoSummary) => void }) {
   const theme = p.theme
   const look = p.scheme ? `scheme:${p.scheme.id}` : theme
   const setTheme = (t: Theme) => {
@@ -138,22 +133,11 @@ export function App(p: { be: Backend; name: string; active: boolean; theme: Them
   const [scrollTo, setScrollTo] = useState<number>()
   const [updatedAt, setUpdatedAt] = useState<Date>()
   const [settings, setSettings] = useState<NetSettings>(loadSettings)
-  const [pullMode, setPullMode] = useState<PullMode>('merge')
   const [aiInfo, setAiInfo] = useState<AiInfo>()
   const [aiDialog, setAiDialog] = useState<'consent' | 'settings'>()
   const [drafting, setDrafting] = useState<'commit' | 'branch'>()
   const draftStop = useRef<AbortController | undefined>(undefined)
-  const [terms, setTerms] = useState<TermTab[]>([])
   const [noGit, setNoGit] = useState(false)
-  const [termActive, setTermActive] = useState<string>()
-  const [termRunning, setTermRunning] = useState<Record<string, boolean>>({})
-  const termSeq = useRef(0)
-  const [drawerShown, setDrawerShown] = useState(false)
-  const [termFocus, setTermFocus] = useState(false)
-  const [drawerMax, setDrawerMax] = useState(false)
-  const [drawerH, setDrawerH] = useState(() => Number(stored('ramulus.drawer')) || 280)
-  const [paste, setPaste] = useState<{ id: number; text: string; tab: string }>()
-  const [restart, setRestart] = useState({ tab: '', n: 0 })
   const consent = useRef<((agent?: string) => void) | undefined>(undefined)
   const overlayRef = useRef(false)
   const filterRef = useRef<HTMLInputElement>(null)
@@ -166,9 +150,6 @@ export function App(p: { be: Backend; name: string; active: boolean; theme: Them
   const busyRef = useRef(busy)
   busyRef.current = busy
 
-  useEffect(() => {
-    localStorage.setItem('ramulus.drawer', String(drawerH))
-  }, [drawerH])
   useEffect(() => {
     localStorage.setItem('ramulus.leftw', String(leftW))
   }, [leftW])
@@ -256,13 +237,10 @@ export function App(p: { be: Backend; name: string; active: boolean; theme: Them
           return v.be.pull('ff-only', v.data.headBranch)
         }),
       fetch: () => remote('Fetching', (v) => v.be.fetchAll()),
-      showTerm: (id) => showTerm(id),
+      showTerm: (id) => panel.show(id),
     })
   }, [])
 
-  useEffect(() => {
-    if (noGit) p.onSummary({ branch: '', changes: 0, ahead: 0, behind: 0, busy: false, noGit })
-  }, [noGit])
 
   // a folder without git becomes a repository once git init runs in it, here or anywhere;
   // checking now and then, because watching a big plain folder such as ~ costs far more
@@ -285,18 +263,6 @@ export function App(p: { be: Backend; name: string; active: boolean; theme: Them
     if (p.active) reload()
   }, [p.active])
 
-  useEffect(() => {
-    if (!view) return
-    const cur = view.data.local.find((b) => b.isHead)
-    const s = view.data.status
-    p.onSummary({
-      branch: view.data.headBranch ?? (view.data.headOid ? 'detached' : ''),
-      changes: new Set([...s.staged, ...s.unstaged].map((f) => f.path)).size,
-      ahead: cur?.ahead ?? 0,
-      behind: cur?.behind ?? 0,
-      busy: !!busy,
-    })
-  }, [view, busy])
 
   useEffect(() => {
     const fresh = (t: DiffTab) => {
@@ -349,7 +315,7 @@ export function App(p: { be: Backend; name: string; active: boolean; theme: Them
   useEffect(() => {
     if (!view) return
     const gone = (t: DiffTab) => {
-      if (t.dirty || t.file || t.pr || t.sel.area.kind === 'commit') return false
+      if (t.dirty || t.file || t.pr || t.review || t.sel.area.kind === 'commit') return false
       const list = t.sel.area.kind === 'staged' ? view.data.status.staged : view.data.status.unstaged
       return !list.some((f) => f.path === t.sel.path)
     }
@@ -488,104 +454,6 @@ export function App(p: { be: Backend; name: string; active: boolean; theme: Them
     }
   }
 
-  const activeTerm = terms.find((t) => t.id === termActive) ?? terms[terms.length - 1]
-  const termLabel = (t: TermTab) => {
-    const { label } = termTitle(t)
-    if (t.title) return label
-    const same = terms.filter((x) => !x.title && x.kind === t.kind && x.agent === t.agent)
-    return same.length > 1 ? `${label} ${same.findIndex((x) => x.id === t.id) + 1}` : label
-  }
-
-  // Only explicit opens take the keyboard, not the remount that comes with switching repositories.
-  const showTerm = (id: string) => {
-    setTermActive(id)
-    setDrawerShown(true)
-    setTermFocus(true)
-  }
-
-  const addTerm = (kind: TermKind, agent?: string) => {
-    const t = { id: `${PAGE_TAG}-${++termSeq.current}`, kind, agent }
-    setTerms((ts) => [...ts, t])
-    showTerm(t.id)
-    return t
-  }
-
-  const openAgent = async (conflictFile?: string) => {
-    const picked = await pickAgent().catch((e) => void say(e))
-    if (!picked) return
-    const t = (activeTerm?.kind === 'agent' ? activeTerm : terms.findLast((x) => x.kind === 'agent')) ?? addTerm('agent', picked.agent)
-    showTerm(t.id)
-    if (conflictFile) setPaste({ id: Date.now(), tab: t.id, text: fillPrompt(picked.settings.prompts.conflict || DEFAULT_PROMPTS.conflict, conflictFile) })
-  }
-
-  const toggleAgent = async () => {
-    if (drawerShown) return setDrawerShown(false)
-    if (activeTerm) return showTerm(activeTerm.id)
-    if (!p.be.termStart || !p.be.ai) return setToast('Run npx ramulus in a repository to use your AI agent here')
-    const info = await p.be.ai().catch(() => undefined)
-    if (info && (info.settings.enabled === false || info.agents.length === 0)) return openAiSettings()
-    openAgent()
-  }
-
-  const closeTerm = (id: string) => {
-    p.be.termStop?.(id).catch(() => {})
-    const rest = terms.filter((t) => t.id !== id)
-    setTerms(rest)
-    if (activeTerm?.id === id) setTermActive(rest[rest.length - 1]?.id)
-    if (paste?.tab === id) setPaste(undefined)
-    if (rest.length === 0) {
-      setDrawerShown(false)
-      setDrawerMax(false)
-    }
-  }
-
-  const closeAllTerms = () => {
-    p.be.termStop?.().catch(() => {})
-    setPaste(undefined)
-    setTerms([])
-    setTermActive(undefined)
-    setDrawerShown(false)
-    setDrawerMax(false)
-  }
-
-  const newTermMenu = (e: MouseEvent) => {
-    const r = (e.currentTarget as HTMLElement).getBoundingClientRect()
-    const agents = aiReady ? (aiInfo?.agents ?? []) : []
-    setMenu({
-      x: r.left,
-      y: r.bottom + 4,
-      items: [
-        ...agents.map((a) => ({ label: a.name, onClick: () => void addTerm('agent', a.id) })),
-        ...(agents.length ? [] : [{ label: 'Set up an AI agent…', onClick: openAiSettings }]),
-        { label: 'Terminal', onClick: () => void addTerm('shell') },
-      ],
-    })
-  }
-  useEffect(() => {
-    p.be.termList?.().then((list) => {
-      if (!list.length) return
-      setTerms((ts) => [...list, ...ts])
-      // the tabs open when Ramulus last closed come back where they were
-      setDrawerShown(true)
-    }, () => {})
-    return () => void p.be.termStop?.().catch(() => {})
-  }, [])
-
-  // titles change as the programs run, such as Claude Code naming the conversation and showing it is working
-  useEffect(() => {
-    if (!drawerShown || !p.active || !terms.length || !p.be.termList) return
-    const timer = setInterval(
-      () =>
-        p.be.termList!().then((list) => {
-          const titles = new Map(list.map((t) => [t.id, t.title]))
-          const changed = (t: TermTab) => titles.has(t.id) && titles.get(t.id) !== t.title
-          setTerms((ts) => (ts.some(changed) ? ts.map((t) => (changed(t) ? { ...t, title: titles.get(t.id) } : t)) : ts))
-        }, () => {}),
-      1500,
-    )
-    return () => clearInterval(timer)
-  }, [drawerShown, p.active, terms.length])
-
   const closeDialog = () => {
     if (drafting === 'branch') draftStop.current?.abort()
     setDialog(undefined)
@@ -597,30 +465,70 @@ export function App(p: { be: Backend; name: string; active: boolean; theme: Them
       (e) => fail('Could not read the AI settings', e),
     )
 
+  const panel = useAgentPanel({ be: p.be, active: p.active, look, agents: aiReady ? (aiInfo?.agents ?? []) : [], pickAgent, openAiSettings, say, setMenu })
+
+  useEffect(() => {
+    if (noGit) p.onSummary({ branch: '', changes: 0, ahead: 0, behind: 0, busy: false, noGit, agent: panel.state })
+  }, [noGit, panel.state])
+  useEffect(() => {
+    if (!view) return
+    const cur = view.data.local.find((b) => b.isHead)
+    const s = view.data.status
+    p.onSummary({
+      branch: view.data.headBranch ?? (view.data.headOid ? 'detached' : ''),
+      changes: new Set([...s.staged, ...s.unstaged].map((f) => f.path)).size,
+      ahead: cur?.ahead ?? 0,
+      behind: cur?.behind ?? 0,
+      busy: !!busy,
+      agent: panel.state,
+    })
+  }, [view, busy, panel.state])
+
   const aiCommands = (): Command[] => {
     if (!p.be.ai) return []
     const list: Command[] = [{ id: 'ai-settings', group: 'AI', label: 'AI agent settings', run: openAiSettings }]
     if (!p.be.termStart) return list
-    list.push({ id: 'ai-term', group: 'AI', label: drawerShown ? 'Hide the agent panel' : 'Show the agent panel', hint: '⌃`', run: toggleAgent })
-    list.push({ id: 'term-new', group: 'AI', label: 'New terminal tab', run: () => void addTerm('shell') })
-    if (terms.length) list.push({ id: 'ai-stop', group: 'AI', label: 'Close every agent and terminal tab', run: closeAllTerms })
+    list.push({ id: 'ai-term', group: 'AI', label: panel.shown ? 'Hide the agent panel' : 'Show the agent panel', hint: '⌃`', run: panel.toggle })
+    list.push({ id: 'term-new', group: 'AI', label: 'New terminal tab', run: () => void panel.add('shell') })
+    if (panel.list.length) list.push({ id: 'ai-stop', group: 'AI', label: 'Close every agent and terminal tab', run: panel.closeAll })
     if (!aiReady) return list
     if (view?.data.status.staged.length) list.push({ id: 'ai-commit', group: 'AI', label: 'Draft a commit message with your AI agent', run: () => aiDraft('commit') })
-    for (const f of view?.data.status.unstaged.filter((x) => x.conflict) ?? []) list.push({ id: `ai-fix:${f.path}`, group: 'AI', label: `Fix the conflict in ${f.path} with your AI agent`, run: () => openAgent(f.path) })
+    for (const f of view?.data.status.unstaged.filter((x) => x.conflict) ?? []) list.push({ id: `ai-fix:${f.path}`, group: 'AI', label: `Fix the conflict in ${f.path} with your AI agent`, run: () => panel.openAgent(f.path) })
     return list
   }
 
   const conflictToast = (r: unknown) => r === 'conflicts' && setToast('There are conflicts to resolve')
 
-  const doCommit = () => {
+  const doCommit = (push = false) => {
     if (!view || !summary.trim()) return
     const msg = description.trim() ? `${summary.trim()}\n\n${description.trim()}` : summary.trim()
-    run('Committing', () => view.be.commit(msg, amend), {
-      after: () => {
-        setSummary('')
-        setDescription('')
-        setAmend(false)
-      },
+    const v = view
+    run(push ? 'Committing and pushing' : 'Committing', async () => {
+      await v.be.commit(msg, amend)
+      // the commit is made, so the message goes even if the push then fails
+      setSummary('')
+      setDescription('')
+      setAmend(false)
+      if (push && head) return v.be.push(head)
+    }, { after: (r) => push && afterPush(r as PushResult | void) })
+  }
+
+  const cleanupMerged = (list: { name: string }[]) => {
+    const v = view!
+    const remotes = new Map(v.data.remote.map((b) => [b.name, b]))
+    setDialog({
+      kind: 'cleanup',
+      branches: list.map((b) => {
+        const pr = prs.get(b.name)!
+        const upstream = v.data.local.find((x) => x.name === b.name)?.upstream
+        const remote = upstream && remotes.get(upstream)?.oid === pr.oid && v.be.deleteRemoteBranch ? upstream : undefined
+        return { name: b.name, pr: pr.number, remote }
+      }),
+      run: (local, remote) =>
+        run('Deleting merged branches', async () => {
+          for (const name of local) await v.be.deleteBranch(name)
+          for (const name of remote) await v.be.deleteRemoteBranch!(name)
+        }, { after: () => setToast(`Deleted ${local.length} branch${local.length === 1 ? '' : 'es'}${remote.length ? `, ${remote.length} on the remote` : ''}`) }),
     })
   }
 
@@ -653,24 +561,43 @@ export function App(p: { be: Backend; name: string; active: boolean; theme: Them
     return run(lease ? 'Force pushing' : 'Pushing', () => v.be.push(head, lease), { after: (r) => afterPush(r as PushResult | void, lease) })
   }
 
+  // brings in the remote's commits by rebase or merge, then pushes when it was a push that was refused
+  const integrate = (how: PullMode, push: boolean) => () => {
+    const v = view!
+    run(how === 'rebase' ? 'Rebasing onto the remote' : 'Merging the remote', async () => {
+      try {
+        await v.be.pull(how, head!)
+      } catch (e) {
+        if ((await v.be.status()).state) return 'conflicts'
+        throw e
+      }
+      return push ? v.be.push(head!) : 'pulled'
+    }, {
+      after: (x) => (x === 'conflicts' ? setToast(push ? 'Resolve, Continue, then push again' : 'Resolve the conflicts, then Continue') : x === 'pulled' ? setToast('Pull done') : afterPush(x as PushResult | void)),
+    })
+  }
+
   const afterPush = (r: PushResult | void, lease?: string) => {
     if (!r || r.result === 'pushed') return setToast(lease ? 'Force push done' : 'Push done')
-    const v = view!
-    const integrate = (how: PullMode) => () =>
-      run(how === 'rebase' ? 'Rebasing onto the remote' : 'Merging the remote', async () => {
-        try {
-          await v.be.pull(how, head!)
-        } catch (e) {
-          if ((await v.be.status()).state) return 'conflicts'
-          throw e
-        }
-        return v.be.push(head!)
-      }, {
-        after: (x) => (x === 'conflicts' ? setToast('Resolve, Continue, then push again') : afterPush(x as PushResult | void)),
-      })
     const n = (k: number) => `${k} commit${k === 1 ? '' : 's'}`
     const force = () => confirm(`Force pushing replaces ${head} on the remote and drops ${n(r.behind)} that only the remote has. Continue?`, () => pushHead(r.theirs))
-    setDialog({ kind: 'push-rejected', branch: head!, ahead: r.ahead, behind: r.behind, rebase: integrate('rebase'), merge: integrate('merge'), force })
+    setDialog({ kind: 'diverged', branch: head!, ahead: r.ahead, behind: r.behind, push: true, rebase: integrate('rebase', true), merge: integrate('merge', true), force })
+  }
+
+  // fast-forward when it can; when both sides have new commits, ask how to combine them instead of failing
+  const pullHead = () => {
+    const v = view
+    if (!v || !head) return
+    run('Pulling', async () => {
+      try {
+        await v.be.pull(v.be.native ? 'ff-only' : 'merge', head)
+      } catch (e) {
+        if (v.be.native && cannotFastForward(e)) return 'diverged'
+        throw e
+      }
+    }, {
+      after: (r) => (r === 'diverged' ? setDialog({ kind: 'diverged', branch: head, push: false, rebase: integrate('rebase', false), merge: integrate('merge', false) }) : setToast('Pull done')),
+    })
   }
 
   const undoRebase = () => {
@@ -769,20 +696,23 @@ export function App(p: { be: Backend; name: string; active: boolean; theme: Them
       const s = view.data.stashes.find((s) => s.oid === c.id)!
       items = stashItems(s.index, s.message)
     } else {
-      const refs = view.data.refsByOid.get(c.id) ?? []
+      // one set of items per label, so a branch and its upstream on the same commit are not listed twice
+      const pills = groupPills(view.data.refsByOid.get(c.id) ?? [], view.data.local)
       const isHead = view.data.headOid === c.id
-      for (const l of refs) {
-        if (l.kind === 'head') items.push(...branchItems(l.name, c.id, l.current ?? false).filter((i) => i.label !== 'New branch from here'))
-        if (l.kind === 'remote') items.push(...remoteItems(l.name))
-        if (l.kind === 'tag') items.push(...tagItems(l.name, c.id))
+      for (const pill of pills) {
+        if (pill.local) items.push(...branchItems(pill.local.name, c.id, pill.current).filter((i) => i.label !== 'New branch from here'))
+        else if (pill.remote) items.push(...remoteItems(pill.remote.name))
+        if (pill.tag) items.push(...tagItems(pill.tag.name, c.id))
         items.push({ sep: true })
       }
+      // a branch label here already offers rebasing onto it
+      const rebaseOffered = pills.some((x) => !x.current && (x.local || x.remote))
       if (!isHead) items.push({ label: 'Check out here (no branch)', onClick: () => run('Checking out', () => v.be.checkoutCommit(c.id)) })
       items.push({ label: 'New branch from here', onClick: () => setDialog({ kind: 'branch', at: c.id }) })
       items.push({ label: 'New tag here', onClick: () => setDialog({ kind: 'tag', at: c.id }) })
       if (head && !isHead) {
         items.push({ sep: true })
-        if (v.be.rebase) items.push({ label: `Rebase ${head} here`, onClick: () => rebaseOnto(c.id) })
+        if (v.be.rebase && !rebaseOffered) items.push({ label: `Rebase ${head} here`, onClick: () => rebaseOnto(c.id) })
         if (v.be.cherryPick) items.push({ label: 'Cherry-pick this commit', onClick: () => run('Cherry-picking', () => v.be.cherryPick!(c.id), { after: conflictToast }) })
         items.push({ label: `Reset ${head} to this commit...`, onClick: () => setDialog({ kind: 'reset', at: c.id }) })
       }
@@ -847,6 +777,11 @@ export function App(p: { be: Backend; name: string; active: boolean; theme: Them
   const openPr = (pr: PullRequest) => {
     const key = `pr:${pr.number}`
     setDiffTabs((ts) => (ts.some((t) => t.key === key) ? ts : [...ts, { key, sel: { area: { kind: 'unstaged' }, path: `#${pr.number}` }, dirty: false, pr }]))
+    showTab(key)
+  }
+  const openReview = (area: DiffArea) => {
+    const key = `review:${area.kind}:${area.kind === 'commit' ? area.oid : ''}`
+    setDiffTabs((ts) => (ts.some((t) => t.key === key) ? ts : [...ts, { key, sel: { area, path: '' }, dirty: false, review: true }]))
     showTab(key)
   }
   const openWorkFile = (path: string) => {
@@ -924,8 +859,7 @@ export function App(p: { be: Backend; name: string; active: boolean; theme: Them
     const v = view
     const list: Command[] = [
       { id: 'fetch', group: 'Action', label: 'Fetch every remote', hint: '⌘L', run: () => run('Fetch', () => v.be.fetchAll(), { after: () => setToast('Fetch done') }) },
-      { id: 'pull', group: 'Action', label: 'Pull', run: () => head && run('Pull', () => v.be.pull(pullMode, head), { after: () => setToast('Pull done') }) },
-      ...(v.be.native ? (Object.keys(PULL_MODES) as PullMode[]).map((m) => ({ id: `pullmode:${m}`, group: 'Action', label: `Pull mode: ${PULL_MODES[m]}${m === pullMode ? ' (current)' : ''}`, run: () => setPullMode(m) })) : []),
+      { id: 'pull', group: 'Action', label: 'Pull', run: pullHead },
       { id: 'push', group: 'Action', label: 'Push', run: () => pushHead() },
       { id: 'branch', group: 'Action', label: 'New branch from HEAD', hint: '⌘B', run: () => v.data.headOid && setDialog({ kind: 'branch', at: v.data.headOid }) },
       { id: 'stash', group: 'Action', label: 'Stash everything', run: () => setDialog({ kind: 'stash' }) },
@@ -944,6 +878,9 @@ export function App(p: { be: Backend; name: string; active: boolean; theme: Them
     ]
     list.push(...aiCommands())
     if (solo.size) list.push({ id: 'unsolo', group: 'View', label: 'Show all branches', run: () => setSolo(new Set()) })
+    const merged = mergedBranches(v.data.local, prs)
+    if (merged.length) list.push({ id: 'cleanup', group: 'Action', label: `Delete ${merged.length} branch${merged.length === 1 ? '' : 'es'} whose pull request merged`, run: () => cleanupMerged(merged) })
+    if (v.data.status.unstaged.length) list.push({ id: 'review', group: 'View', label: 'Review every unstaged change', run: () => openReview({ kind: 'unstaged' }) })
     list.push({ id: 'open', group: 'Action', label: 'Open repository…', run: p.onOpenRepo })
     for (const b of v.data.local) {
       if (!b.isHead) list.push({ id: `sw:${b.name}`, group: 'Branch', label: `Switch to ${b.name}`, run: () => run('Switching branch', () => v.be.checkoutBranch(b.name)) })
@@ -953,14 +890,14 @@ export function App(p: { be: Backend; name: string; active: boolean; theme: Them
     for (const b of v.data.remote) list.push({ id: `swr:${b.name}`, group: 'Remote', label: `Switch to ${b.name}`, run: () => switchRemote(b.name) })
     for (const t of v.data.tags) list.push({ id: `tag:${t.name}`, group: 'Tag', label: `Jump to ${t.name}`, run: () => jump(t.oid) })
     return list
-  }, [view, head, pullMode, theme, tree, solo, aiInfo, aiReady, terms, drawerShown])
+  }, [view, head, theme, tree, solo, aiInfo, aiReady, panel.list, panel.shown, prs])
 
   useEffect(() => {
     if (!p.active) return
     const onKey = (e: KeyboardEvent) => {
       if (e.ctrlKey && e.key === '`' && p.be.termStart) {
         e.preventDefault()
-        toggleAgent()
+        panel.toggle()
         return
       }
       if (e.target instanceof Element && e.target.closest('.diff-pane, .agent-drawer')) return
@@ -1008,6 +945,7 @@ export function App(p: { be: Backend; name: string; active: boolean; theme: Them
           if (next !== undefined) {
             select(next)
             setScrollTo(next)
+            if (leftMode === 'changes' || leftMode === 'commit') setLeftMode(view.rows[next].kind === 'wip' ? 'changes' : 'commit')
           }
         }
       }
@@ -1060,9 +998,6 @@ export function App(p: { be: Backend; name: string; active: boolean; theme: Them
             <Icon name="list-selection" />
           </button>
         )}
-        <button onClick={() => setShortcuts(true)} title="Keyboard shortcuts (?)">
-          <Icon name="keyboard" />
-        </button>
         <button onClick={themeMenu} title="Theme and color scheme" aria-label="Theme and color scheme">
           <Icon name="color-mode" />
         </button>
@@ -1070,73 +1005,6 @@ export function App(p: { be: Backend; name: string; active: boolean; theme: Them
     )
   }
 
-  const drawer = activeTerm && drawerShown && p.active && (
-
-    <div class="agent-drawer" style={drawerMax ? undefined : { height: `${drawerH}px` }}>
-      {!drawerMax && <Splitter horizontal onDrag={(dy) => setDrawerH((h) => clamp(h - dy, 120, innerHeight - 200))} />}
-      <div class="drawer-head">
-        <div class="term-tabs" role="tablist" aria-label="Agent and terminal tabs">
-          {terms.map((t) => (
-            <div
-              key={t.id}
-              role="tab"
-              tabIndex={0}
-              aria-selected={t.id === activeTerm.id}
-              class={`term-tab ${t.id === activeTerm.id ? 'active' : ''} ${termRunning[t.id] === false ? 'stopped' : ''} ${termTitle(t).busy ? 'busy' : ''}`}
-              title={termRunning[t.id] === false ? `${termLabel(t)} (stopped)` : termLabel(t)}
-              onClick={() => showTerm(t.id)}
-              onKeyDown={(e) => (e.key === 'Enter' || e.key === ' ') && showTerm(t.id)}
-            >
-              <Icon name={t.kind === 'shell' ? 'terminal' : termTitle(t).busy ? 'loading' : 'sparkle'} />
-              <span class="label">{termLabel(t)}</span>
-              <button
-                class="icon"
-                title="Close this tab"
-                aria-label={`Close ${termLabel(t)}`}
-                onClick={(e) => {
-                  e.stopPropagation()
-                  closeTerm(t.id)
-                }}
-              >
-                <Icon name="close" />
-              </button>
-            </div>
-          ))}
-          <button class="icon" title="New agent or terminal tab" aria-label="New agent or terminal tab" onClick={newTermMenu}>
-            <Icon name="add" />
-          </button>
-        </div>
-        <span class="spacer" />
-        <button class="icon" title={`Restart this ${activeTerm.kind === 'shell' ? 'terminal' : 'agent'}`} aria-label="Restart this tab" onClick={() => setRestart((r) => ({ tab: activeTerm.id, n: r.n + 1 }))}>
-          <Icon name="debug-restart" />
-        </button>
-        <button class="icon" title="AI agent settings" aria-label="AI agent settings" onClick={openAiSettings}>
-          <Icon name="settings-gear" />
-        </button>
-        <button class="icon" title={drawerMax ? 'Restore the panel' : 'Maximize the panel'} aria-label={drawerMax ? 'Restore the panel' : 'Maximize the panel'} onClick={() => setDrawerMax((m) => !m)}>
-          <Icon name={drawerMax ? 'screen-normal' : 'screen-full'} />
-        </button>
-        <button class="icon" title="Hide the panel (⌃`)" aria-label="Hide the panel" onClick={() => setDrawerShown(false)}>
-          <Icon name="chevron-down" />
-        </button>
-      </div>
-      <AgentTerminal
-        key={activeTerm.id}
-        be={p.be}
-        id={activeTerm.id}
-        kind={activeTerm.kind}
-        agent={activeTerm.agent}
-        look={look}
-        focus={termFocus}
-        onFocused={() => setTermFocus(false)}
-        paste={paste?.tab === activeTerm.id ? paste : undefined}
-        restart={restart.tab === activeTerm.id ? restart.n : 0}
-        onState={(st) => setTermRunning((m) => ({ ...m, [activeTerm.id]: st.running }))}
-        onPasted={() => setPaste(undefined)}
-      />
-    </div>
-  )
-  const drawerCls = `${terms.length && drawerShown ? 'with-drawer' : ''} ${terms.length && drawerShown && drawerMax ? 'drawer-max' : ''}`
   const initRepo = () =>
     p.be.init!().then(
       () => openBackend(p.be),
@@ -1160,9 +1028,21 @@ export function App(p: { be: Backend; name: string; active: boolean; theme: Them
     </>
   )
 
+  const agentButton = (
+    <button
+      class={`ai-btn ${panel.shown ? 'on' : ''} ${panel.state === 'waiting' ? 'waiting' : ''}`}
+      onClick={panel.toggle}
+      title={panel.state === 'waiting' ? 'Your agent finished. Show it (⌃`)' : 'Your AI agent and terminals (⌃`)'}
+      aria-pressed={panel.shown}
+    >
+      <Icon name="sparkle" />
+      Agent
+    </button>
+  )
+
   if (!view) {
     return (
-      <div class={`app ${drawerCls}`}>
+      <div class={`app ${panel.cls}`}>
         <div class="toolbar">
           {noGit && (
             <>
@@ -1171,15 +1051,7 @@ export function App(p: { be: Backend; name: string; active: boolean; theme: Them
                 <span class="repo">{p.name}</span>
               </div>
               <div />
-              <div class="tb-side tb-end">
-                <SidebarToggle on={p.sidebar} onToggle={p.onToggleSidebar} />
-                {p.be.termStart && (
-                  <button class={`ai-btn ${drawerShown ? 'on' : ''}`} onClick={toggleAgent} title="Agent and terminals (⌃`)" aria-pressed={drawerShown}>
-                    <Icon name="sparkle" />
-                    Agent
-                  </button>
-                )}
-              </div>
+              <div class="tb-side tb-end">{p.be.termStart && agentButton}</div>
             </>
           )}
         </div>
@@ -1197,11 +1069,11 @@ export function App(p: { be: Backend; name: string; active: boolean; theme: Them
               )}
               {p.be.termStart && (
                 <>
-                  <button class="secondary" onClick={() => void openAgent()}>
+                  <button class="secondary" onClick={() => void panel.openAgent()}>
                     <Icon name="sparkle" />
                     Agent
                   </button>
-                  <button class="secondary" onClick={() => void addTerm('shell')}>
+                  <button class="secondary" onClick={() => void panel.add('shell')}>
                     <Icon name="terminal" />
                     Terminal
                   </button>
@@ -1212,7 +1084,7 @@ export function App(p: { be: Backend; name: string; active: boolean; theme: Them
         ) : (
           <div class="placeholder">{busy ? `${busy}...` : 'This repository could not be read.'}</div>
         )}
-        {drawer}
+        {panel.view}
         {statusBar()}
         {menu && <Menu menu={menu} onClose={() => setMenu(undefined)} />}
         {shortcuts && <Shortcuts onClose={() => setShortcuts(false)} />}
@@ -1229,12 +1101,16 @@ export function App(p: { be: Backend; name: string; active: boolean; theme: Them
   const currentColor = current ? laneColor(layoutOf(v.indexOf.get(current.id)!).column) : 'var(--lane-0)'
   const wipCount = new Set([...v.data.status.staged, ...v.data.status.unstaged].map((f) => f.path)).size
   const branchOf = (r: { name: string; kind: string }) => (r.kind === 'head' ? r.name : r.kind === 'remote' ? r.name.slice(r.name.indexOf('/') + 1) : '')
+  const mode: LeftMode = leftMode === 'commit' && !current ? 'changes' : leftMode
   const shownPr =
-    sel?.kind === 'commit'
-      ? (v.data.refsByOid.get(sel.oid) ?? []).map((r) => prs.get(branchOf(r))).find(Boolean)
+    mode === 'commit'
+      ? (v.data.refsByOid.get(current!.id) ?? []).map((r) => prs.get(branchOf(r))).find(Boolean)
       : v.data.headBranch
         ? prs.get(v.data.headBranch)
         : undefined
+  const cur = v.data.local.find((b) => b.isHead)
+  const canPush = !!head && (!!cur?.upstream || v.data.remote.length > 0)
+  const merged = mergedBranches(v.data.local, prs)
   const net = (label: string, fn: () => Promise<unknown>) => run(label, fn, { after: () => setToast(`${label} done`) })
   const changePr = (pr: PullRequest, action: PrChange) =>
     run(`${CHANGE_LABEL[action][0]} #${pr.number}`, async () => {
@@ -1266,7 +1142,7 @@ export function App(p: { be: Backend; name: string; active: boolean; theme: Them
     })
 
   return (
-    <div class={`app ${drawerCls}`}>
+    <div class={`app ${panel.cls}`}>
       <div class="toolbar">
         <div class="tb-side">
           <BrandMark />
@@ -1284,26 +1160,10 @@ export function App(p: { be: Backend; name: string; active: boolean; theme: Them
           {busy && <span class="busy">{busy}...</span>}
         </div>
         <div class="tb-actions" role="toolbar" aria-label="Repository actions">
-          <span class="split">
-            <button class="tool" disabled={!!busy || !head} onClick={() => net('Pull', () => v.be.pull(pullMode, head!))} title={v.be.native ? `Pull (${PULL_MODES[pullMode]})` : 'Pull'}>
-              <Icon name="arrow-circle-down" />
-              <span class="tl">Pull</span>
-            </button>
-            {v.be.native && (
-              <button
-                class="tool tb-more"
-                disabled={!!busy || !head}
-                title="How pull integrates changes"
-                aria-label="Pull options"
-                onClick={(e) => {
-                  const r = (e.currentTarget as HTMLElement).getBoundingClientRect()
-                  setMenu({ x: r.left - 34, y: r.bottom + 4, items: (Object.keys(PULL_MODES) as PullMode[]).map((m) => ({ label: PULL_MODES[m], checked: m === pullMode, onClick: () => setPullMode(m) })) })
-                }}
-              >
-                <Icon name="chevron-down" />
-              </button>
-            )}
-          </span>
+          <button class="tool" disabled={!!busy || !head} onClick={pullHead} title={v.be.native ? 'Pull. Asks how to combine them when both sides have new commits' : 'Pull'}>
+            <Icon name="arrow-circle-down" />
+            <span class="tl">Pull</span>
+          </button>
           <button class="tool" disabled={!!busy || !head} onClick={() => pushHead()} title="Push the checked-out branch">
             <Icon name="arrow-circle-up" />
             <span class="tl">Push</span>
@@ -1317,24 +1177,14 @@ export function App(p: { be: Backend; name: string; active: boolean; theme: Them
             <Icon name="git-branch-create" />
             <span class="tl">Branch</span>
           </button>
-          <span class="split">
-            <button class="tool" disabled={!!busy || wipCount === 0} onClick={() => setDialog({ kind: 'stash' })} title="Stash everything">
-              <Icon name="git-stash" />
-              <span class="tl">Stash</span>
-            </button>
-            <button
-              class="tool tb-more"
-              disabled={!!busy || v.data.stashes.length === 0}
-              title="Put the newest stash back"
-              aria-label="Stash options"
-              onClick={(e) => {
-                const r = (e.currentTarget as HTMLElement).getBoundingClientRect()
-                setMenu({ x: r.left - 34, y: r.bottom + 4, items: [{ label: 'Apply and drop the newest stash', onClick: () => run('Applying stash', () => v.be.stashApply(0, true)) }] })
-              }}
-            >
-              <Icon name="chevron-down" />
-            </button>
-          </span>
+          <button class="tool" disabled={!!busy || wipCount === 0} onClick={() => setDialog({ kind: 'stash' })} title="Stash everything">
+            <Icon name="git-stash" />
+            <span class="tl">Stash</span>
+          </button>
+          <button class="tool" disabled={!!busy || v.data.stashes.length === 0} onClick={() => run('Applying stash', () => v.be.stashApply(0, true))} title="Put the newest stash back and drop it">
+            <Icon name="git-stash-pop" />
+            <span class="tl">Pop</span>
+          </button>
         </div>
         <div class="tb-side tb-end">
           <span class="search">
@@ -1342,7 +1192,6 @@ export function App(p: { be: Backend; name: string; active: boolean; theme: Them
             <input ref={filterRef} placeholder="Search commits (⌘F)" value={filter} onInput={(e) => setFilter((e.target as HTMLInputElement).value)} />
           </span>
           {filter && <span class="busy">{order.length} results</span>}
-          <SidebarToggle on={p.sidebar} onToggle={p.onToggleSidebar} />
           <button class={`icon ${showLeft ? 'on' : ''}`} onClick={() => setShowLeft(!showLeft)} title="Toggle left panel (⌘J)">
             <Icon name={showLeft ? 'layout-sidebar-left' : 'layout-sidebar-left-off'} />
           </button>
@@ -1351,11 +1200,7 @@ export function App(p: { be: Backend; name: string; active: boolean; theme: Them
               <Icon name="settings-gear" />
             </button>
           )}
-          <BrandLinks />
-          <button class={`ai-btn ${drawerShown ? 'on' : ''}`} onClick={toggleAgent} title="Your AI agent and terminals (⌃`)" aria-pressed={drawerShown}>
-            <Icon name="sparkle" />
-            Agent
-          </button>
+          {agentButton}
         </div>
       </div>
       <div class={`body ${showLeft ? '' : 'no-left'}`} style={{ '--left-w': `${leftW}px` }}>
@@ -1382,17 +1227,20 @@ export function App(p: { be: Backend; name: string; active: boolean; theme: Them
           prs={prs}
           onMergePr={v.be.prMerge ? mergePr : undefined}
           onOpenPr={v.be.prView ? openPr : undefined}
-          mode={leftMode}
+          mode={mode}
           onMode={setLeftMode}
+          hasCommit={!!current}
+          merged={merged.length}
+          onCleanup={() => cleanupMerged(merged)}
           detail={
             <DetailPanel
-              top={
+              pr={
                 shownPr && v.be.prView ? (
                   <PrCard key={shownPr.number} be={v.be} pr={shownPr} active={p.active} stamp={v} busy={!!busy} onOpen={openPr} onMerge={v.be.prMerge ? mergePr : undefined} onChange={v.be.prChange ? changePr : undefined} />
                 ) : undefined
               }
               data={v.data}
-              commit={current}
+              commit={mode === 'commit' ? current : undefined}
               commitColor={currentColor}
               commitFiles={commitFiles}
               isStash={!!current && v.data.stashes.some((s) => s.oid === current.id)}
@@ -1411,7 +1259,9 @@ export function App(p: { be: Backend; name: string; active: boolean; theme: Them
               onDiscard={discardFiles}
               onStageAll={() => run('Staging', () => v.be.stage(v.data.status.unstaged), { statusOnly: true })}
               onUnstageAll={() => run('Unstaging', () => v.be.unstage(v.data.status.staged.map((f) => f.path)), { statusOnly: true })}
-              onCommit={doCommit}
+              onCommit={() => doCommit()}
+              onCommitPush={canPush ? () => doCommit(true) : undefined}
+              onReview={openReview}
               onCopy={copy}
               onJump={jump}
               onFileMenu={fileMenu}
@@ -1420,7 +1270,7 @@ export function App(p: { be: Backend; name: string; active: boolean; theme: Them
               onContinue={v.be.continueOp ? () => run('Continuing', () => v.be.continueOp!()) : undefined}
               onAiCommit={aiReady ? () => aiDraft('commit') : undefined}
               aiDrafting={drafting === 'commit'}
-              onAiFix={aiReady && p.be.termStart ? (path) => openAgent(path) : undefined}
+              onAiFix={aiReady && p.be.termStart ? (path) => panel.openAgent(path) : undefined}
             />
           }
         />
@@ -1440,7 +1290,7 @@ export function App(p: { be: Backend; name: string; active: boolean; theme: Them
           soloCount={solo.size}
           onSelect={(i) => {
             select(i)
-            setLeftMode('commit')
+            setLeftMode(v.rows[i].kind === 'wip' ? 'changes' : 'commit')
           }}
           onContextMenu={rowMenu}
           onPillDoubleClick={pillDoubleClick}
@@ -1470,11 +1320,15 @@ export function App(p: { be: Backend; name: string; active: boolean; theme: Them
             onOpen={v.be.openPath ? (f) => v.be.openPath!(f.path).catch((err) => fail('Could not open the file', err)) : undefined}
             onMergePr={v.be.prMerge ? mergePr : undefined}
             onChangePr={v.be.prChange ? changePr : undefined}
+            status={v.data.status}
+            onOpenFile={openFile}
+            onStage={(files) => run('Staging', () => v.be.stage(files), { statusOnly: true })}
+            onUnstage={(paths) => run('Unstaging', () => v.be.unstage(paths), { statusOnly: true })}
             busy={!!busy}
           />
         )}
       </div>
-      {drawer}
+      {panel.view}
       {statusBar(v)}
       {menu && <Menu menu={menu} onClose={() => setMenu(undefined)} />}
       {palette && (

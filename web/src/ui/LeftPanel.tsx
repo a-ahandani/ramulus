@@ -27,14 +27,21 @@ export interface LeftProps {
   onOpenPr?: (pr: PullRequest) => void
   mode: LeftMode
   onMode: (mode: LeftMode) => void
+  /** a commit is selected in the graph, so the Commit tab has something to show */
+  hasCommit: boolean
+  /** how many local branches can go because their pull request merged */
+  merged: number
+  onCleanup: () => void
   detail: JSX.Element
 }
 
-export type LeftMode = 'commit' | 'branches' | 'files'
+/** Changes is always the working tree; Commit is the commit selected in the graph. */
+export type LeftMode = 'branches' | 'changes' | 'commit' | 'files'
 
 const MODES: { id: LeftMode; label: string; icon: string }[] = [
   { id: 'branches', label: 'Branches', icon: 'git-branch' },
-  { id: 'commit', label: 'Changes', icon: 'source-control' },
+  { id: 'changes', label: 'Changes', icon: 'source-control' },
+  { id: 'commit', label: 'Commit', icon: 'git-commit' },
   { id: 'files', label: 'Files', icon: 'files' },
 ]
 
@@ -71,11 +78,12 @@ function PrLink({ pr, onMerge, onOpen }: { pr?: PullRequest; onMerge?: (pr: Pull
   )
 }
 
-function Section({ title, count, open, onToggle }: { title: string; count: number; open: boolean; onToggle: () => void }) {
+function Section({ title, count, open, onToggle, action }: { title: string; count: number; open: boolean; onToggle: () => void; action?: JSX.Element }) {
   return (
     <div class="section" onClick={onToggle}>
       <Icon name={open ? 'chevron-down' : 'chevron-right'} />
       {title}
+      {action}
       <span class="count">{count}</span>
     </div>
   )
@@ -115,7 +123,15 @@ export function LeftPanel(p: LeftProps) {
   const modes = (
     <div class="left-modes" role="tablist" aria-label="Left panel">
       {MODES.map((m) => (
-        <button key={m.id} role="tab" aria-selected={p.mode === m.id} class={p.mode === m.id ? 'on' : ''} onClick={() => p.onMode(m.id)}>
+        <button
+          key={m.id}
+          role="tab"
+          aria-selected={p.mode === m.id}
+          class={p.mode === m.id ? 'on' : ''}
+          disabled={m.id === 'commit' && !p.hasCommit}
+          title={m.id === 'commit' && !p.hasCommit ? 'Select a commit in the graph' : undefined}
+          onClick={() => p.onMode(m.id)}
+        >
           <Icon name={m.icon} />
           <span class="label">{m.label}</span>
         </button>
@@ -126,7 +142,7 @@ export function LeftPanel(p: LeftProps) {
     return (
       <div class="left tabbed">
         {modes}
-        {p.mode === 'commit' ? p.detail : <FileExplorer load={p.loadFiles} status={p.data.status} stamp={p.stamp} selected={p.selectedFile} onOpen={p.onOpenFile} />}
+        {p.mode === 'files' ? <FileExplorer load={p.loadFiles} status={p.data.status} stamp={p.stamp} selected={p.selectedFile} onOpen={p.onOpenFile} /> : p.detail}
       </div>
     )
   }
@@ -136,7 +152,28 @@ export function LeftPanel(p: LeftProps) {
       <div class="left-filter">
         <input placeholder="Filter branches and tags" value={filter} onInput={(e) => setFilter((e.target as HTMLInputElement).value)} />
       </div>
-      <Section title="LOCAL" count={local.length} open={open.local} onToggle={() => toggle('local')} />
+      <Section
+        title="LOCAL"
+        count={local.length}
+        open={open.local}
+        onToggle={() => toggle('local')}
+        action={
+          p.merged > 0 ? (
+            <button
+              class="icon sec-act"
+              title={`Delete the ${p.merged === 1 ? 'branch' : `${p.merged} branches`} whose pull request merged`}
+              aria-label="Delete merged branches"
+              onClick={(e) => {
+                e.stopPropagation()
+                p.onCleanup()
+              }}
+            >
+              <Icon name="clear-all" />
+              {p.merged} merged
+            </button>
+          ) : undefined
+        }
+      />
       {open.local && (
         <div class="sec-body">
           {local.map((b) => (

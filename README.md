@@ -29,19 +29,21 @@ Ramulus is Latin for a small branch.
 
 ![The branch graph of a repository with local and remote branches, two tags, a stash and uncommitted changes, with a commit selected and its changed file listed](docs/screenshots/overview.png)
 
-- A lane graph with merge, stash and work-in-progress nodes, author avatars, and one label per branch with ahead and behind counts against its upstream.
+- A lane graph with merge, stash and work-in-progress nodes, author avatars on the nodes, and one label per branch with ahead and behind counts against its upstream.
 - Search commits by message, author, hash or ref. Solo one or two branches to see only their history.
 - The checked-out branch is a solid label with a check mark, sits first in the branch list, and is a chip in the toolbar that switches branches.
 - Double-click a remote branch to switch to its local branch and bring it up to date. Your uncommitted changes come along, and a branch with commits of its own is switched to but never rewritten.
 - Drag a branch label onto a commit to merge or rebase. A lifted copy follows the pointer and says what the drop will do, the graph scrolls at its edges, and Esc cancels. Right-click any commit, branch, tag or stash for checkout, new branch, tag, cherry-pick, revert, reset, rename and delete.
-- Fetch, pull (merge, fast-forward only or rebase) and push. When a merge or rebase stops on conflicts, a banner offers Continue and Abort.
+- Fetch, pull and push. Pull fast-forwards, and when both sides have new commits it asks whether to rebase or merge. When a merge or rebase stops on conflicts, a banner offers Continue and Abort.
+- Delete the branches whose pull request merged in one step, here and optionally on the remote. Only branches still at exactly the merged commit are offered.
 
 ### Diffs and staging
 
 ![A diff window beside the commit box, with two change blocks staged and a commit message drafted by the AI agent](docs/screenshots/diff.png)
 
-- Every file you click opens as a tab in one diff view that takes the graph's place beside the left panel, or maximize it over the left panel too. The graph stays one click away as the first tab. Unchanged regions are collapsed until you open them.
-- The left panel has three tabs: Branches, Changes (the commit box, or the selected commit's files) and Files, which shows the whole working tree with changed files marked. A file opened from Files opens in a plain editor instead of a diff.
+- Every file you click opens as a tab in one diff view that takes the graph's place beside the left panel, or maximize it over the left panel too. The graph stays one click away as the first tab. Unchanged regions are collapsed until you open them, and a diff opens at its first change.
+- Review every change of the working tree, the index or a commit in one tab, as one scrolling list of diffs with the stage and discard toolbar on each block.
+- The left panel has four tabs: Branches, Changes (always the commit box and the working tree), Commit (the commit selected in the graph) and Files, which shows the whole working tree with changed files marked. Commit & push commits and pushes in one go. A file opened from Files opens in a plain editor instead of a diff.
 - The diff runs on Monaco, the open-source editor component: side by side or inline, a +/− gutter, folded unchanged regions, syntax highlighting and word wrap.
 - Stage, unstage or discard one change block from the small toolbar beside it. Edit the working-tree side and save with ⌘S.
 - Staging writes whole file contents rather than patches, so line endings and byte-order marks survive exactly. If a file changed underneath you, the write is refused instead of guessed.
@@ -68,7 +70,7 @@ Ramulus is Latin for a small branch.
 - Ramulus looks for Claude Code, Codex, Gemini CLI and opencode on your PATH and asks before using any of them. Pick one if several are installed. Each uses its own sign-in, so there is no API key to add.
 - The sparkle in the commit box drafts a message from the staged changes, and the one in the new-branch dialog suggests a name. Both fill the field for you to review and edit.
 - The Agent button in the top bar (or ⌃\`) opens a panel at the bottom that runs the agent's own interactive tool in the repository's folder, so you can chat with it as you would in your own terminal. Add more tabs with +, for another agent or a plain terminal, and maximize the panel when you want the whole window. The sparkle on a conflicted file pastes a resolve prompt into it without sending it, so you can change it first. The agent then edits the file with its own approvals, and the result shows up as an unstaged change for you to review.
-- Each agent tab is named after the conversation, the way Claude Code titles its terminal, with a spinner while it works.
+- Each agent tab is named after the conversation, the way Claude Code titles its terminal, with a spinner while it works. When one finishes while you are elsewhere, its project in the sidebar and the Agent button get a mark until you look.
 - Every prompt can be edited in AI agent settings in the command palette.
 
 ### Keyboard

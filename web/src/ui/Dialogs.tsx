@@ -14,7 +14,9 @@ export type Dialog =
   | { kind: 'confirm'; message: string; action: () => void }
   | { kind: 'error'; title: string; message: string }
   | { kind: 'settings' }
-  | { kind: 'push-rejected'; branch: string; ahead: number; behind: number; rebase: () => void; merge: () => void; force: () => void }
+  /** the branch and its remote both have commits the other lacks, found by a refused push or a pull that cannot fast-forward */
+  | { kind: 'diverged'; branch: string; ahead?: number; behind?: number; push: boolean; rebase: () => void; merge: () => void; force?: () => void }
+  | { kind: 'cleanup'; branches: { name: string; pr: number; remote?: string }[]; run: (local: string[], remote: string[]) => void }
   | { kind: 'repos'; folder: string; inside?: boolean; repos: { dir: string; name: string }[]; open: (dirs: string[]) => void }
   | { kind: 'scheme' }
   | { kind: 'pr-merge'; number: number; title: string; last: MergeMethod; merge: (method: MergeMethod) => void }
@@ -72,7 +74,8 @@ export function Dialogs(p: DialogProps) {
   const [name, setName] = useState(d.kind === 'rename' ? d.old : '')
   const [message, setMessage] = useState('')
   const [checkout, setCheckout] = useState(true)
-  const [picked, setPicked] = useState<Set<string>>(() => new Set(d.kind === 'repos' ? d.repos.map((r) => r.dir) : []))
+  const [picked, setPicked] = useState<Set<string>>(() => new Set(d.kind === 'repos' ? d.repos.map((r) => r.dir) : d.kind === 'cleanup' ? d.branches.map((b) => b.name) : []))
+  const [alsoRemote, setAlsoRemote] = useState(false)
   const [net, setNet] = useState(p.settings)
   const [query, setQuery] = useState('')
   const [busy, setBusy] = useState(false)
@@ -312,28 +315,68 @@ export function Dialogs(p: DialogProps) {
         </Frame>
       )
     }
-    case 'push-rejected': {
+    case 'diverged': {
       const n = (k: number) => `${k} commit${k === 1 ? '' : 's'}`
+      const counted = d.ahead !== undefined && d.behind !== undefined
+      const then = d.push ? ', then push' : ''
       return (
         <Frame title="The remote has commits you don't have" onClose={p.onClose}>
           <div>
-            {d.branch} is {n(d.behind)} ahead of you on the remote, and you have {n(d.ahead)} it lacks.
+            {counted ? `${d.branch} is ${n(d.behind!)} ahead of you on the remote, and you have ${n(d.ahead!)} it lacks.` : `${d.branch} has new commits both here and on the remote, so it cannot simply fast-forward.`}
           </div>
           <button class="choice" onClick={() => (p.onClose(), d.rebase())}>
-            <b>Rebase onto theirs, then push</b>
-            <span>Your {n(d.ahead)} on top of theirs. Recommended.</span>
+            <b>Rebase onto theirs{then}</b>
+            <span>{counted ? `Your ${n(d.ahead!)}` : 'Your commits'} on top of theirs. Recommended.</span>
           </button>
           <button class="choice" onClick={() => (p.onClose(), d.merge())}>
-            <b>Merge theirs, then push</b>
+            <b>Merge theirs{then}</b>
             <span>A merge commit joins both sides.</span>
           </button>
-          <button class="choice danger" onClick={() => (p.onClose(), d.force())}>
-            <b>Force push</b>
-            <span>Drops their {n(d.behind)}. Stops if the remote moves again.</span>
-          </button>
+          {d.force && (
+            <button class="choice danger" onClick={() => (p.onClose(), d.force!())}>
+              <b>Force push</b>
+              <span>Drops their {n(d.behind ?? 0)}. Stops if the remote moves again.</span>
+            </button>
+          )}
           <div class="buttons">
             <button onClick={p.onClose}>Cancel</button>
           </div>
+        </Frame>
+      )
+    }
+    case 'cleanup': {
+      const chosen = d.branches.filter((b) => picked.has(b.name))
+      const remote = chosen.flatMap((b) => (b.remote ? [b.remote] : []))
+      const n = chosen.length
+      return (
+        <Frame title="Delete the merged branches?" onClose={p.onClose}>
+          <div>Each of these points at exactly the commit its pull request merged, so nothing is lost.</div>
+          <div class="repo-list">
+            {d.branches.map((b) => (
+              <label key={b.name}>
+                <input
+                  type="checkbox"
+                  checked={picked.has(b.name)}
+                  onChange={() =>
+                    setPicked((s) => {
+                      const next = new Set(s)
+                      if (next.has(b.name)) next.delete(b.name)
+                      else next.add(b.name)
+                      return next
+                    })
+                  }
+                />
+                {b.name}
+                <span class="path">#{b.pr}</span>
+              </label>
+            ))}
+          </div>
+          {d.branches.some((b) => b.remote) && (
+            <label>
+              <input type="checkbox" checked={alsoRemote} onChange={(e) => setAlsoRemote((e.target as HTMLInputElement).checked)} /> Also delete {remote.length === 1 ? 'it' : 'them'} on the remote ({remote.length})
+            </label>
+          )}
+          <Buttons ok={n === 1 ? 'Delete 1 branch' : `Delete ${n} branches`} danger enabled={n > 0} onOk={() => (d.run(chosen.map((b) => b.name), alsoRemote ? remote : []), p.onClose())} onClose={p.onClose} />
         </Frame>
       )
     }
