@@ -61,6 +61,7 @@ export function httpBackend(base: string, token: string, repo?: string): Backend
     checkoutCommit: (oid) => call('checkoutCommit', { oid }),
     createBranch: (name, at, checkout) => call('createBranch', { name, at, checkout }),
     deleteBranch: (name) => call('deleteBranch', { name }),
+    ciRuns: () => call('ciRuns'),
     deleteRemoteBranch: (name) => call('deleteRemoteBranch', { name }),
     renameBranch: (oldName, newName) => call('renameBranch', { oldName, newName }),
     createTag: (name, at, message) => call('createTag', { name, at, message }),

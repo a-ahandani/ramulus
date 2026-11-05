@@ -3324,3 +3324,41 @@ button.spin .codicon {
   padding: 10px 12px;
   color: var(--fg-2);
 }
+
+.row .ci-mark {
+  display: inline-flex;
+  width: auto;
+  height: auto;
+  margin-right: 6px;
+  padding: 0;
+  vertical-align: -3px;
+  background: transparent;
+}
+
+.ci-mark.pass,
+.sb-state .ci.pass {
+  color: var(--green);
+}
+
+.ci-mark.fail,
+.sb-state .ci.fail {
+  color: var(--red);
+}
+
+.ci-mark.running,
+.sb-state .ci.running {
+  color: var(--yellow);
+}
+
+.ci-mark.cancelled,
+.ci-mark.skipped {
+  color: var(--fg-2);
+}
+
+.ci-mark.running .codicon {
+  animation: sb-spin 1.2s linear infinite;
+}
+
+.sb-state .ci.fail .codicon {
+  animation: none;
+}

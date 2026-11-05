@@ -1,13 +1,15 @@
 #![cfg(unix)]
 mod common;
 use common::*;
-use ramulus::prs::{change_pull_request, merge_pull_request, pr_conversation, pull_request, pull_requests};
+use ramulus::prs::{change_pull_request, ci_runs, merge_pull_request, pr_conversation, pull_request, pull_requests};
 use serde_json::{json, Value};
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 
 const LIST: &str = r#"[{"number":7,"title":"Add login","url":"https://github.com/o/r/pull/7","headRefName":"login","headRefOid":"aaa1","baseRefName":"main","state":"OPEN","isDraft":true},{"number":3,"title":"Old","url":"https://github.com/o/r/pull/3","headRefName":"old","headRefOid":"bbb2","baseRefName":"main","state":"MERGED","isDraft":false}]"#;
+
+const RUNS: &str = r#"[{"headSha":"c1","status":"in_progress","conclusion":"","workflowName":"CLI","url":"u1"},{"headSha":"c1","status":"completed","conclusion":"failure","workflowName":"Server","url":"u2"},{"headSha":"c1","status":"completed","conclusion":"success","workflowName":"CLI","url":"u0"},{"headSha":"c0","status":"completed","conclusion":"cancelled","workflowName":"CLI","url":"u3"},{"headSha":"c0","status":"completed","conclusion":"neutral","workflowName":"Docs","url":"u4"}]"#;
 
 struct Stub {
     root: PathBuf,
@@ -21,7 +23,7 @@ fn gh_dir() -> &'static Path {
         let bin = Path::new(env!("CARGO_TARGET_TMPDIR")).join("prs-bin");
         std::fs::create_dir_all(&bin).unwrap();
         let script = format!(
-            "#!/bin/sh\nif [ -n \"$GITHUB_TOKEN\" ]; then echo 'HTTP 401: Bad credentials' >&2; exit 1; fi\nif [ \"$1\" = api ]; then printf '%s\\n' \"$@\" >> \"$STUB/api.log\"; /bin/cat \"$STUB/talk.json\"; exit 0; fi\nif [ \"$2\" = view ]; then /bin/cat \"$STUB/view.json\"; exit 0; fi\nif [ \"$2\" = ready ] || [ \"$2\" = close ] || [ \"$2\" = reopen ]; then echo \"$@\" >> \"$STUB/changes.log\"; exit 0; fi\nif [ \"$2\" = merge ]; then echo \"$@\" >> \"$STUB/merges.log\"; if [ \"$3\" = 9 ]; then echo 'Pull request is not mergeable: the merge commit cannot be cleanly created.' >&2; exit 1; fi; exit 0; fi\necho '{LIST}'\n"
+            "#!/bin/sh\nif [ -n \"$GITHUB_TOKEN\" ]; then echo 'HTTP 401: Bad credentials' >&2; exit 1; fi\nif [ \"$1\" = api ]; then printf '%s\\n' \"$@\" >> \"$STUB/api.log\"; /bin/cat \"$STUB/talk.json\"; exit 0; fi\nif [ \"$2\" = view ]; then /bin/cat \"$STUB/view.json\"; exit 0; fi\nif [ \"$2\" = ready ] || [ \"$2\" = close ] || [ \"$2\" = reopen ]; then echo \"$@\" >> \"$STUB/changes.log\"; exit 0; fi\nif [ \"$2\" = merge ]; then echo \"$@\" >> \"$STUB/merges.log\"; if [ \"$3\" = 9 ]; then echo 'Pull request is not mergeable: the merge commit cannot be cleanly created.' >&2; exit 1; fi; exit 0; fi\nif [ \"$1\" = run ]; then echo '{RUNS}'; exit 0; fi\necho '{LIST}'\n"
         );
         std::fs::write(bin.join("gh"), script).unwrap();
         std::fs::set_permissions(bin.join("gh"), std::fs::Permissions::from_mode(0o755)).unwrap();
@@ -83,6 +85,21 @@ async fn reads_them_through_gh_retrying_without_a_token_that_gh_rejects() {
         vec![
             json!({ "number": 7, "title": "Add login", "url": "https://github.com/o/r/pull/7", "branch": "login", "oid": "aaa1", "base": "main", "state": "DRAFT" }),
             json!({ "number": 3, "title": "Old", "url": "https://github.com/o/r/pull/3", "branch": "old", "oid": "bbb2", "base": "main", "state": "MERGED" }),
+        ]
+    );
+}
+
+#[tokio::test]
+async fn reads_the_newest_actions_run_per_commit_and_workflow() {
+    let st = Stub::new();
+    let runs = ci_runs(&st.repo("runs"), &st.env(true)).await;
+    assert_eq!(
+        runs,
+        vec![
+            json!({ "sha": "c1", "workflow": "CLI", "state": "running", "url": "u1" }),
+            json!({ "sha": "c1", "workflow": "Server", "state": "fail", "url": "u2" }),
+            json!({ "sha": "c0", "workflow": "CLI", "state": "cancelled", "url": "u3" }),
+            json!({ "sha": "c0", "workflow": "Docs", "state": "skipped", "url": "u4" }),
         ]
     );
 }

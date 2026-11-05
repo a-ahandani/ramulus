@@ -18,7 +18,7 @@ Run it inside any git repository, or pass a path: `npx ramulus ~/code/app`. Run 
 
 - **Visual control while your agent codes.** Let Claude Code, Codex, Gemini CLI or opencode write the code in a panel beside the graph. Every edit shows up as a diff and every branch as a lane, so you review what it did and choose what to stage and commit.
 - **Your git, unchanged.** Every operation runs through the git binary you already use, so SSH keys, credential helpers, hooks and LFS behave exactly as they do in the terminal.
-- **Nothing leaves your machine unless you ask.** The server listens on 127.0.0.1 and every request carries a per-run token. The only outside requests are your own git remotes, avatar lookups on gravatar.com, pull request lookups through the GitHub CLI when you have it installed, the images, videos and avatars of a pull request you open, which load only from GitHub's own hosts, and, if you turn it on, the AI agent you already use.
+- **Nothing leaves your machine unless you ask.** The server listens on 127.0.0.1 and every request carries a per-run token. The only outside requests are your own git remotes, avatar lookups on gravatar.com, pull request and Actions run lookups through the GitHub CLI when you have it installed, the images, videos and avatars of a pull request you open, which load only from GitHub's own hosts, and, if you turn it on, the AI agent you already use.
 - **One command.** No installer, no sign-in, no license key. Close the terminal and it is gone.
 
 Ramulus is Latin for a small branch.
@@ -35,6 +35,7 @@ Ramulus is Latin for a small branch.
 - Double-click a remote branch to switch to its local branch and bring it up to date. Your uncommitted changes come along, and a branch with commits of its own is switched to but never rewritten.
 - Drag a branch label onto a commit to merge or rebase. A lifted copy follows the pointer and says what the drop will do, the graph scrolls at its edges, and Esc cancels. Right-click any commit, branch, tag or stash for checkout, new branch, tag, cherry-pick, revert, reset, rename and delete.
 - Fetch, pull and push. Pull fast-forwards, and when both sides have new commits it asks whether to rebase or merge. When a merge or rebase stops on conflicts, a banner offers Continue and Abort.
+- GitHub Actions on every pushed commit: a mark in the graph that spins while runs go and turns green or red, with each workflow and a link to its run one click away. The sidebar shows when checks run or fail on each project's checked-out commit. It reads them through the GitHub CLI and asks again while anything runs.
 - Delete the branches whose pull request merged in one step, here and optionally on the remote. Only branches still at exactly the merged commit are offered.
 
 ### Diffs and staging

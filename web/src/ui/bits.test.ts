@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { ago, cannotFastForward, finished, mergedBranches, prsByBranch, settleLimited, termTitle, webUrl } from './bits'
+import { ago, cannotFastForward, ciByCommit, ciState, finished, mergedBranches, prsByBranch, settleLimited, termTitle, webUrl } from './bits'
 
 describe('settleLimited', () => {
   it('never runs more than the limit at once and keeps results in order', async () => {
@@ -90,5 +90,14 @@ describe('cannotFastForward', () => {
     expect(cannotFastForward(new Error('fatal: Not possible to fast-forward, aborting.'))).toBe(true)
     expect(cannotFastForward('hint: Diverging branches can\'t be fast-forwarded')).toBe(true)
     expect(cannotFastForward(new Error('fatal: could not read from remote'))).toBe(false)
+  })
+})
+
+describe('ciState', () => {
+  it('shows a failure first, then a run still going, then a pass, per commit', () => {
+    const run = (sha: string, state: 'pass' | 'fail' | 'running' | 'cancelled' | 'skipped') => ({ sha, workflow: state, state, url: '' })
+    const by = ciByCommit([run('a', 'pass'), run('a', 'running'), run('b', 'pass'), run('b', 'fail'), run('b', 'running'), run('c', 'skipped'), run('c', 'pass')])
+    expect([...by.keys()]).toEqual(['a', 'b', 'c'])
+    expect(['a', 'b', 'c', 'none'].map((sha) => ciState(by.get(sha)))).toEqual(['running', 'fail', 'pass', undefined])
   })
 })

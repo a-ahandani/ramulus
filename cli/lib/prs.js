@@ -32,6 +32,37 @@ async function load(dir, env) {
   }
 }
 
+const RUN_FIELDS = 'headSha,status,conclusion,workflowName,url'
+// the app asks again every few seconds while a run is going, so this cache is short
+const RUNS_FRESH_MS = 10000
+const runsCache = new Map()
+const RUN_CONCLUSION = { success: 'pass', failure: 'fail', timed_out: 'fail', action_required: 'fail', startup_failure: 'fail', cancelled: 'cancelled' }
+
+async function loadRuns(dir, env) {
+  try {
+    const out = await ghSignedIn(['run', 'list', '--limit', '100', '--json', RUN_FIELDS], dir, env)
+    const seen = new Set()
+    // newest first, so a later run of the same workflow on the same commit hides the one before
+    return JSON.parse(out).flatMap((r) => {
+      const k = `${r.headSha}\n${r.workflowName}`
+      if (seen.has(k)) return []
+      seen.add(k)
+      return [{ sha: r.headSha, workflow: r.workflowName, state: r.status !== 'completed' ? 'running' : (RUN_CONCLUSION[r.conclusion] ?? 'skipped'), url: r.url }]
+    })
+  } catch {
+    return []
+  }
+}
+
+/** The repository's recent GitHub Actions runs, one per commit and workflow; empty without gh or GitHub. */
+export function ciRuns(dir, env = process.env) {
+  const hit = runsCache.get(dir)
+  if (hit && Date.now() - hit.at < RUNS_FRESH_MS) return hit.list
+  const list = loadRuns(dir, env)
+  runsCache.set(dir, { at: Date.now(), list })
+  return list
+}
+
 export function pullRequests(dir, env = process.env) {
   const hit = cache.get(dir)
   if (hit && Date.now() - hit.at < FRESH_MS) return hit.list
