@@ -102,6 +102,7 @@ export function AgentTerminal(p: {
   id: string
   kind: TermKind
   agent?: string
+  resume?: string
   look: string
   focus: boolean
   paste?: { id: number; text: string }
@@ -182,7 +183,7 @@ export function AgentTerminal(p: {
       const start = async () => {
         detach()
         try {
-          const r = await (session = latest.current.be.termStart!(latest.current.id, latest.current.kind, latest.current.agent, xt.cols, xt.rows))
+          const r = await (session = latest.current.be.termStart!(latest.current.id, latest.current.kind, latest.current.agent, xt.cols, xt.rows, latest.current.resume))
           latest.current.onState({ running: true, agent: r.agent })
           lastOutput = Date.now()
           detach = latest.current.be.termStream!(

@@ -1,7 +1,7 @@
 import type { JSX } from 'preact'
 import { useEffect, useRef, useState } from 'preact/hooks'
 import type { CheckState, TermTab } from '../git/backend'
-import { CI_ICON, Icon, termTitle } from './bits'
+import { AgentLogo, CI_ICON, Icon, termTitle } from './bits'
 import { fuzzyScore } from './Palette'
 
 export interface RepoSummary {
@@ -380,7 +380,7 @@ export function Sidebar(p: {
                   p.onPickTerm(peek.id, t.id)
                 }}
               >
-                <Icon name={t.kind === 'shell' ? 'terminal' : busy ? 'loading' : 'sparkle'} />
+                {t.kind === 'shell' || busy ? <Icon name={t.kind === 'shell' ? 'terminal' : 'loading'} /> : <AgentLogo agent={t.agent} />}
                 <span class="label">{label}</span>
               </button>
             )

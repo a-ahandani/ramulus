@@ -1,6 +1,6 @@
 use crate::git::{self, DiffArea, FileChange};
 use crate::term::Terminals;
-use crate::{ai, err, home, prs, resolve, Env, Error, Result};
+use crate::{ai, err, home, prs, resolve, sessions, Env, Error, Result};
 use axum::body::Bytes;
 use axum::extract::{DefaultBodyLimit, Path as UrlPath, Query, Request, State};
 use axum::http::{header, HeaderMap, Method, StatusCode};
@@ -55,7 +55,7 @@ pub struct App {
 }
 
 const SHELL_OPS: [&str; 10] = ["repos", "pins", "setPins", "prefs", "setPrefs", "findRepos", "pickFolder", "ai", "setAi", "openRepo"];
-const REPO_OPS: [&str; 50] = [
+const REPO_OPS: [&str; 51] = [
     "load",
     "init",
     "files",
@@ -102,6 +102,7 @@ const REPO_OPS: [&str; 50] = [
     "aiContext",
     "termStart",
     "termList",
+    "agentSessions",
     "termInput",
     "termResize",
     "termStop",
@@ -442,11 +443,19 @@ impl App {
                 if kind == "agent" {
                     self.need_ai()?;
                 }
-                val(self
-                    .terms
-                    .start(repo, &term_id(b.get("id"))?, kind, &b.string("agent"), b.i64("cols"), b.i64("rows"), env)?)
+                val(self.terms.start(
+                    repo,
+                    &term_id(b.get("id"))?,
+                    kind,
+                    &b.string("agent"),
+                    b.i64("cols"),
+                    b.i64("rows"),
+                    b.str("resume").filter(|r| !r.is_empty()),
+                    env,
+                )?)
             }
             "termList" => val(self.terms.list(repo)),
+            "agentSessions" => val(sessions::agent_sessions(repo, self.terms.held(repo), env).await),
             "termInput" => {
                 self.terms.write(repo, &term_id(b.get("id"))?, b.string("data")).await;
                 done()

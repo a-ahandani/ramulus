@@ -2,7 +2,9 @@ pub mod ai;
 pub mod git;
 pub mod prs;
 pub mod server;
+pub mod sessions;
 pub mod term;
+pub mod wake;
 
 use std::collections::HashMap;
 use std::path::{Component, Path, PathBuf};
