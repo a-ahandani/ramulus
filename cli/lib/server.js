@@ -40,6 +40,7 @@ const OPS = {
   checkoutCommit: (dir, b) => git.checkoutCommit(dir, b.oid),
   createBranch: (dir, b) => git.createBranch(dir, b.name, b.at, b.checkout),
   deleteBranch: (dir, b) => git.deleteBranch(dir, b.name),
+  deleteRemoteBranch: (dir, b) => git.deleteRemoteBranch(dir, b.name),
   renameBranch: (dir, b) => git.renameBranch(dir, b.oldName, b.newName),
   createTag: (dir, b) => git.createTag(dir, b.name, b.at, b.message),
   deleteTag: (dir, b) => git.deleteTag(dir, b.name),

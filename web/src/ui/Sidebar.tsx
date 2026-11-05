@@ -12,6 +12,8 @@ export interface RepoSummary {
   busy: boolean
   /** a folder without git */
   noGit?: boolean
+  /** an agent tab is working, or finished while nobody was looking at it */
+  agent?: 'working' | 'waiting'
 }
 
 export interface SideTab {
@@ -241,6 +243,16 @@ export function Sidebar(p: {
         {t.summary && (
           <span class="sb-state">
             {t.summary.busy && <Icon name="sync" />}
+            {t.summary.agent === 'waiting' && (
+              <span class="agent-waiting" title="Your agent finished. Open the project to see what it did">
+                <Icon name="sparkle-filled" />
+              </span>
+            )}
+            {t.summary.agent === 'working' && (
+              <span title="Your agent is working">
+                <Icon name="loading" />
+              </span>
+            )}
             {t.summary.changes > 0 && (
               <span class="changes" title={`${t.summary.changes} uncommitted ${t.summary.changes === 1 ? 'change' : 'changes'}`}>
                 {t.summary.changes}
@@ -282,8 +294,8 @@ export function Sidebar(p: {
             <Icon name="ellipsis" />
           </button>
         )}
-        <button class={`icon ${p.docked ? 'on' : ''}`} title={p.docked ? 'Unpin: slide in from the left edge when needed' : 'Pin the sidebar open'} aria-label={p.docked ? 'Unpin the sidebar' : 'Pin the sidebar open'} aria-pressed={p.docked} onClick={p.onDock}>
-          <Icon name={p.docked ? 'pinned' : 'pin'} />
+        <button class={`icon ${p.docked ? 'on' : ''}`} title={p.docked ? 'Hide: slide in from the left edge when needed' : 'Keep the sidebar open'} aria-label={p.docked ? 'Hide the sidebar' : 'Keep the sidebar open'} aria-pressed={p.docked} onClick={p.onDock}>
+          <Icon name="layout-sidebar-left-dock" />
         </button>
       </div>
       {(p.running || p.status) && (

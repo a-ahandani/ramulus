@@ -11,7 +11,7 @@ use tokio::process::Command;
 
 const FRESH: Duration = Duration::from_secs(60);
 const VIEW_FRESH: Duration = Duration::from_secs(20);
-const FIELDS: &str = "number,title,url,headRefName,state,isDraft";
+const FIELDS: &str = "number,title,url,headRefName,headRefOid,baseRefName,state,isDraft";
 const VIEW_FIELDS: &str = "number,title,body,state,isDraft,author,headRefName,baseRefName,url,createdAt,reviewDecision,mergeStateStatus,statusCheckRollup";
 const METHODS: [&str; 3] = ["merge", "squash", "rebase"];
 
@@ -82,7 +82,7 @@ async fn load(dir: &str, env: &Env) -> Vec<Value> {
     let Ok(Value::Array(items)) = serde_json::from_str::<Value>(&out) else { return vec![] };
     items
         .iter()
-        .map(|p| json!({ "number": p["number"], "title": p["title"], "url": p["url"], "branch": p["headRefName"], "state": state(p) }))
+        .map(|p| json!({ "number": p["number"], "title": p["title"], "url": p["url"], "branch": p["headRefName"], "oid": p["headRefOid"], "base": p["baseRefName"], "state": state(p) }))
         .collect()
 }
 

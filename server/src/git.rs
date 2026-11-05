@@ -938,6 +938,14 @@ pub async fn delete_branch(dir: &str, name: &str) -> Result<()> {
     run(dir, &["branch", "-D", "--", safe_name(name)?], None).await.map(drop)
 }
 
+pub async fn delete_remote_branch(dir: &str, name: &str) -> Result<()> {
+    let remotes = text(dir, &["remote"]).await?;
+    let Some(remote) = remotes.lines().filter(|r| !r.is_empty() && name.starts_with(&format!("{r}/"))).max_by_key(|r| r.len()) else {
+        return err(format!("No remote has the branch {}", serde_json::to_string(name).unwrap_or_default()));
+    };
+    run(dir, &["push", "--delete", "--", remote, safe_name(&name[remote.len() + 1..])?], None).await.map(drop)
+}
+
 pub async fn rename_branch(dir: &str, old_name: &str, new_name: &str) -> Result<()> {
     run(dir, &["branch", "-m", "--", safe_name(old_name)?, safe_name(new_name)?], None).await.map(drop)
 }

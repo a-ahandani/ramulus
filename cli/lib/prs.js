@@ -2,7 +2,7 @@ import { execFile } from 'node:child_process'
 import { findBin } from './ai.js'
 
 const FRESH_MS = 60000
-const FIELDS = 'number,title,url,headRefName,state,isDraft'
+const FIELDS = 'number,title,url,headRefName,headRefOid,baseRefName,state,isDraft'
 const METHODS = ['merge', 'squash', 'rebase']
 const cache = new Map()
 
@@ -26,7 +26,7 @@ async function ghSignedIn(args, dir, env) {
 async function load(dir, env) {
   try {
     const out = await ghSignedIn(['pr', 'list', '--state', 'all', '--limit', '100', '--json', FIELDS], dir, env)
-    return JSON.parse(out).map(({ number, title, url, headRefName, state, isDraft }) => ({ number, title, url, branch: headRefName, state: state === 'OPEN' && isDraft ? 'DRAFT' : state }))
+    return JSON.parse(out).map(({ number, title, url, headRefName, headRefOid, baseRefName, state, isDraft }) => ({ number, title, url, branch: headRefName, oid: headRefOid, base: baseRefName, state: state === 'OPEN' && isDraft ? 'DRAFT' : state }))
   } catch {
     return []
   }

@@ -1,7 +1,11 @@
 import { useEffect, useState } from 'preact/hooks'
 import type { PullRequest, TermTab } from '../git/backend'
+import type { BranchInfo } from '../git/repo'
 
 export const LANES = 10
+
+export const stored = (key: string) => (typeof localStorage === 'undefined' ? null : localStorage.getItem(key))
+export const clamp = (n: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, n))
 
 export function Laptop() {
   return (
@@ -55,12 +59,25 @@ export function prsByBranch(list: PullRequest[]): Map<string, PullRequest> {
   return out
 }
 
-export function SidebarToggle({ on, onToggle }: { on: boolean; onToggle: () => void }) {
-  return (
-    <button class={`icon ${on ? 'on' : ''}`} onClick={onToggle} title={on ? 'Hide the repositories sidebar' : 'Show the repositories sidebar'} aria-pressed={on}>
-      <Icon name="repo" />
-    </button>
-  )
+/** the agent tabs that were working before and are idle now */
+export function finished(before: TermTab[], after: TermTab[]): string[] {
+  const was = new Set(before.filter((t) => termTitle(t).busy).map((t) => t.id))
+  return after.filter((t) => was.has(t.id) && !termTitle(t).busy).map((t) => t.id)
+}
+
+/** git's refusal to fast-forward a branch that has commits of its own */
+export const cannotFastForward = (e: unknown) => /Not possible to fast-forward|Diverging branches/i.test(e instanceof Error ? e.message : String(e))
+
+/**
+ * Branches still pointing at exactly the commit their merged pull request merged, so deleting them loses nothing.
+ * A branch that pull requests merge into, such as develop after a release, is long-lived and never offered.
+ */
+export function mergedBranches(branches: BranchInfo[], prs: Map<string, PullRequest>): BranchInfo[] {
+  const bases = new Set([...prs.values()].map((pr) => pr.base))
+  return branches.filter((b) => {
+    const pr = prs.get(b.name)
+    return !b.isHead && !bases.has(b.name) && pr?.state === 'MERGED' && !!pr.oid && pr.oid === b.oid
+  })
 }
 
 export function BrandMark() {

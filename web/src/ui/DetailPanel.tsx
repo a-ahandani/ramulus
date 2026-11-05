@@ -9,7 +9,8 @@ export interface FileSel {
 }
 
 export interface DetailProps {
-  top?: JSX.Element
+  /** the pull request card; it sits last so that its details loading never moves the file rows */
+  pr?: JSX.Element
   data: RepoData
   commit?: Commit
   commitColor: string
@@ -31,6 +32,8 @@ export interface DetailProps {
   onStageAll: () => void
   onUnstageAll: () => void
   onCommit: () => void
+  onCommitPush?: () => void
+  onReview: (area: DiffArea) => void
   onCopy: (s: string) => void
   onJump: (oid: string) => void
   onFileMenu: (e: MouseEvent, f: FileChange, area: DiffArea) => void
@@ -163,11 +166,16 @@ export function DetailPanel(p: DetailProps) {
       <Icon name={p.tree ? 'list-flat' : 'list-tree'} />
     </button>
   )
+  const reviewBtn = (area: DiffArea, n: number) =>
+    n > 1 && (
+      <button class="icon" title="Review them all in one scrolling diff" aria-label="Review them all" onClick={() => p.onReview(area)}>
+        <Icon name="diff-multiple" />
+      </button>
+    )
   if (p.commit) {
     const c = p.commit
     return (
       <div class="detail">
-        {p.top}
         <div class="detail-head">
           <h2>{c.summary}</h2>
           <div class="who">
@@ -196,11 +204,13 @@ export function DetailPanel(p: DetailProps) {
           {p.isStash ? 'Stash' : 'Changes'}
           <span class="count">{p.commitFiles.length}</span>
           <span class="spacer" />
+          {reviewBtn({ kind: 'commit', oid: c.id }, p.commitFiles.length)}
           {treeToggle}
         </div>
         <div class="files">
           <FileList files={p.commitFiles} tree={p.tree} isSelected={(f) => p.selectedFile?.area.kind === 'commit' && p.selectedFile.area.oid === c.id && p.selectedFile.path === f.path} onPick={(f) => p.onSelectFile({ area: { kind: 'commit', oid: c.id }, path: f.path })} onMenu={(e, f) => p.onFileMenu(e, f, { kind: 'commit', oid: c.id })} />
         </div>
+        {p.pr}
       </div>
     )
   }
@@ -214,7 +224,6 @@ export function DetailPanel(p: DetailProps) {
   const autostash = !state && p.onDropAutostash && p.data.stashes.some((x) => /autostash$/.test(x.message))
   return (
     <div class="detail">
-      {p.top}
       {autostash && (
         <div class="banner">
           <span>{conflicts > 0 ? `Your changes conflicted when put back. Resolve and stage ${conflicts === 1 ? 'the file' : `the ${conflicts} files`} marked !` : 'A copy of your changes is still stashed. Done drops it.'}</span>
@@ -265,6 +274,12 @@ export function DetailPanel(p: DetailProps) {
             <input type="checkbox" checked={p.amend} onChange={(e) => p.onAmend((e.target as HTMLInputElement).checked)} style={{ width: 'auto' }} /> Amend
           </label>
           <span class="right" />
+          {p.onCommitPush && !p.amend && (
+            <button class="secondary" disabled={!canCommit} onClick={p.onCommitPush} title={canCommit ? 'Commit, then push the branch' : why}>
+              <Icon name="arrow-circle-up" />
+              <span>Commit & push</span>
+            </button>
+          )}
           <button class="primary" disabled={!canCommit} onClick={p.onCommit} title={why}>
             <Icon name="check" />
             <span>{label}</span>
@@ -276,6 +291,7 @@ export function DetailPanel(p: DetailProps) {
           Changes
           <span class="count">{s.unstaged.length}</span>
           <span class="spacer" />
+          {reviewBtn({ kind: 'unstaged' }, s.unstaged.length)}
           {treeToggle}
           {s.unstaged.length > 0 && (
             <button class="icon" title="Stage everything" onClick={p.onStageAll}>
@@ -310,6 +326,7 @@ export function DetailPanel(p: DetailProps) {
           Staged
           <span class="count">{s.staged.length}</span>
           <span class="spacer" />
+          {reviewBtn({ kind: 'staged' }, s.staged.length)}
           {s.staged.length > 0 && (
             <button class="icon" title="Unstage everything" onClick={p.onUnstageAll}>
               <Icon name="remove" />
@@ -329,6 +346,7 @@ export function DetailPanel(p: DetailProps) {
           )}
         />
       </div>
+      {p.pr}
     </div>
   )
 }

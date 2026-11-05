@@ -106,6 +106,10 @@ export interface PullRequest {
   title: string
   url: string
   branch: string
+  /** the commit the pull request's branch pointed at, which is what a merged one merged */
+  oid?: string
+  /** the branch it merges into */
+  base?: string
   state: 'OPEN' | 'DRAFT' | 'MERGED' | 'CLOSED'
 }
 
@@ -134,6 +138,7 @@ export interface Backend {
   checkoutCommit(oid: string): Promise<void>
   createBranch(name: string, at: string, checkout: boolean): Promise<void>
   deleteBranch(name: string): Promise<void>
+  deleteRemoteBranch?(name: string): Promise<void>
   renameBranch(oldName: string, newName: string): Promise<void>
   createTag(name: string, at: string, message: string): Promise<void>
   deleteTag(name: string): Promise<void>

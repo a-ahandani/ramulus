@@ -26,6 +26,8 @@ export interface DiffEditorProps {
   onDirty: (dirty: boolean) => void
   onSave: () => void
   handle?: (h: DiffEditorHandle) => void
+  /** as tall as its content, for a list of diffs that scrolls as one */
+  fit?: boolean
 }
 
 export interface DiffEditorHandle {
@@ -43,6 +45,7 @@ interface Control {
 export function DiffEditor(p: DiffEditorProps) {
   const host = useRef<HTMLDivElement>(null)
   const [controls, setControls] = useState<Control[]>([])
+  const [fitH, setFitH] = useState<number>()
   const diffRef = useRef<{ diff: editor.IStandaloneDiffEditor; setLook: (look: string) => void } | undefined>(undefined)
   const base = useRef({ version: 0, applying: false })
   const latest = useRef(p)
@@ -74,6 +77,8 @@ export function DiffEditor(p: DiffEditorProps) {
         minimap: { enabled: false },
         scrollBeyondLastLine: false,
         fixedOverflowWidgets: true,
+        // a diff sized to its content lets the wheel scroll the list it sits in
+        scrollbar: o.fit ? { alwaysConsumeMouseWheel: false } : undefined,
       })
       diff.setModel({ original, modified })
       const mod = diff.getModifiedEditor()
@@ -95,9 +100,23 @@ export function DiffEditor(p: DiffEditorProps) {
           }),
         )
       }
+      const fit = () => {
+        if (!latest.current.fit) return
+        const orig = diff.getOriginalEditor().getContentHeight()
+        setFitH(latest.current.mode === 'inline' ? mod.getContentHeight() : Math.max(orig, mod.getContentHeight()))
+      }
+      let first = true
       const subs = [
         modified.onDidChangeContent(() => base.current.applying || latest.current.onDirty(modified.getAlternativeVersionId() !== base.current.version)),
-        diff.onDidUpdateDiff(measure),
+        diff.onDidUpdateDiff(() => {
+          measure()
+          fit()
+          // opens at the first change rather than at line 1
+          if (first && !latest.current.fit && diff.getLineChanges()?.length) diff.revealFirstDiff()
+          first = false
+        }),
+        mod.onDidContentSizeChange(fit),
+        diff.getOriginalEditor().onDidContentSizeChange(fit),
         mod.onDidScrollChange(measure),
         mod.onDidLayoutChange(measure),
         mod.addAction({ id: 'ramulus.save', label: 'Save', keybindings: [monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS], run: () => latest.current.onSave() }),
@@ -154,7 +173,7 @@ export function DiffEditor(p: DiffEditorProps) {
   }
 
   return (
-    <div class={`diff-editor ${p.mode}`}>
+    <div class={`diff-editor ${p.mode} ${p.fit ? 'fit' : ''}`} style={p.fit ? { height: `${fitH ?? 120}px` } : undefined}>
       <div class="mo-host" ref={host} />
       {p.actions.length > 0 &&
         controls.map((c, i) => (

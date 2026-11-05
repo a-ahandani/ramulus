@@ -331,29 +331,6 @@ select {
   color: var(--fg-bright);
 }
 
-.tb-actions .split {
-  display: flex;
-}
-
-.tb-actions .split .tool:first-child:not(:last-child) {
-  border-radius: 5px 0 0 5px;
-}
-
-.tb-actions .split .tool:first-child:not(:last-child) {
-  padding-right: 3px;
-}
-
-.tb-actions .tool.tb-more {
-  min-width: 0;
-  width: 18px;
-  padding: 0;
-  border-radius: 0 5px 5px 0;
-}
-
-.tb-actions .tool.tb-more .codicon {
-  font-size: 12px;
-}
-
 @media (max-width: 1280px) {
   .tb-actions .tl {
     display: none;
@@ -3211,4 +3188,139 @@ button.spin .codicon {
 .choices.cards label.on {
   border-color: var(--focus);
   background: color-mix(in srgb, var(--focus) 12%, transparent);
+}
+
+.section .sec-act {
+  width: auto;
+  height: 18px;
+  margin-left: auto;
+  padding: 0 4px;
+  gap: 3px;
+  font-size: 11px;
+  font-weight: 400;
+  text-transform: none;
+  color: var(--fg-2);
+}
+
+.section .sec-act + .count {
+  margin-left: 6px;
+}
+
+.left-modes button:disabled {
+  opacity: 0.4;
+}
+
+.commit-box .actions button.secondary {
+  min-width: 0;
+  padding: 0 10px;
+}
+
+.commit-box .actions button.secondary span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* the pull request card sits last, so its details loading never moves the rows above it */
+.detail > .pr-mini:last-child {
+  flex: none;
+  margin-top: auto;
+}
+
+.sb-state .agent-waiting .codicon {
+  animation: none;
+  color: var(--focus);
+}
+
+.ai-btn {
+  position: relative;
+}
+
+.ai-btn.waiting::after,
+.term-tab.waiting::after {
+  content: '';
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--orange);
+}
+
+.ai-btn.waiting::after {
+  position: absolute;
+  top: -1px;
+  right: -1px;
+  box-shadow: 0 0 0 2px var(--bg);
+}
+
+.review {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding-bottom: 24px;
+}
+
+.rv-file {
+  border-bottom: 1px solid var(--line);
+}
+
+.rv-head {
+  position: sticky;
+  top: 0;
+  z-index: 6;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 30px;
+  padding: 0 8px 0 12px;
+  background: var(--side);
+  border-bottom: 1px solid var(--line);
+}
+
+.rv-head .k {
+  font-weight: 700;
+}
+
+.rv-head .spacer {
+  flex: 1;
+}
+
+.rv-head .rv-path {
+  min-width: 0;
+  height: auto;
+  padding: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  background: transparent;
+  color: var(--fg);
+  font-family: var(--mono);
+}
+
+.rv-head .rv-path:hover:not(:disabled) {
+  background: transparent;
+  text-decoration: underline;
+}
+
+.rv-head .stats {
+  display: inline-flex;
+  gap: 6px;
+  font-size: 12px;
+}
+
+.rv-head .plus {
+  color: var(--git-added);
+}
+
+.rv-head .minus {
+  color: var(--git-deleted);
+}
+
+.diff-editor.fit {
+  flex: none;
+}
+
+.rv-note {
+  padding: 10px 12px;
+  color: var(--fg-2);
 }

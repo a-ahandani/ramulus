@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { ago, prsByBranch, settleLimited, termTitle, webUrl } from './bits'
+import { ago, cannotFastForward, finished, mergedBranches, prsByBranch, settleLimited, termTitle, webUrl } from './bits'
 
 describe('settleLimited', () => {
   it('never runs more than the limit at once and keeps results in order', async () => {
@@ -55,5 +55,40 @@ describe('termTitle', () => {
     expect(termTitle({ id: 'a', kind: 'agent', agent: 'claude' })).toEqual({ label: 'Claude Code', busy: false })
     expect(termTitle({ id: 's', kind: 'shell', title: '~ dir' })).toEqual({ label: '~ dir', busy: false })
     expect(termTitle({ id: 's', kind: 'shell' })).toEqual({ label: 'Terminal', busy: false })
+  })
+})
+
+describe('finished', () => {
+  it('names the Claude tabs that went from working to idle, and nothing else', () => {
+    const tab = (id: string, title?: string, kind: 'agent' | 'shell' = 'agent') => ({ id, kind, agent: kind === 'agent' ? 'claude' : undefined, title })
+    const before = [tab('a', '\u2802 Fix login'), tab('b', '\u2802 Tests'), tab('c', '\u2733 Idle'), tab('d', 'zsh', 'shell')]
+    const after = [tab('a', '\u2733 Fix login'), tab('b', '\u2804 Tests'), tab('c', '\u2733 Idle'), tab('d', 'vim', 'shell')]
+    expect(finished(before, after)).toEqual(['a'])
+    expect(finished(before, [])).toEqual([])
+  })
+})
+
+describe('mergedBranches', () => {
+  const pr = (branch: string, state: 'OPEN' | 'MERGED', oid?: string) => ({ number: 1, title: '', url: '', branch, state, oid })
+  it('keeps only branches still at the commit their merged pull request merged, never a branch others merge into', () => {
+    const prs = prsByBranch([pr('done', 'MERGED', 'aaa'), pr('moved', 'MERGED', 'bbb'), pr('open', 'OPEN', 'ccc'), pr('here', 'MERGED', 'ddd'), pr('old-gh', 'MERGED'), pr('develop', 'MERGED', 'ggg'), { ...pr('feature', 'OPEN'), base: 'develop' }])
+    const branches = [
+      { name: 'done', oid: 'aaa', isHead: false },
+      { name: 'moved', oid: 'new', isHead: false },
+      { name: 'open', oid: 'ccc', isHead: false },
+      { name: 'here', oid: 'ddd', isHead: true },
+      { name: 'old-gh', oid: 'eee', isHead: false },
+      { name: 'no-pr', oid: 'fff', isHead: false },
+      { name: 'develop', oid: 'ggg', isHead: false },
+    ]
+    expect(mergedBranches(branches, prs).map((b) => b.name)).toEqual(['done'])
+  })
+})
+
+describe('cannotFastForward', () => {
+  it("recognises git's refusal in old and new wording", () => {
+    expect(cannotFastForward(new Error('fatal: Not possible to fast-forward, aborting.'))).toBe(true)
+    expect(cannotFastForward('hint: Diverging branches can\'t be fast-forwarded')).toBe(true)
+    expect(cannotFastForward(new Error('fatal: could not read from remote'))).toBe(false)
   })
 })
