@@ -5,30 +5,39 @@ use ramulus::prs::{change_pull_request, merge_pull_request, pr_conversation, pul
 use serde_json::{json, Value};
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
+use std::sync::OnceLock;
 
 const LIST: &str = r#"[{"number":7,"title":"Add login","url":"https://github.com/o/r/pull/7","headRefName":"login","state":"OPEN","isDraft":true},{"number":3,"title":"Old","url":"https://github.com/o/r/pull/3","headRefName":"old","state":"MERGED","isDraft":false}]"#;
 
 struct Stub {
     root: PathBuf,
-    bin: PathBuf,
+}
+
+// One gh for every test, written before any test starts a process: Linux refuses to run a file
+// that a process forked meanwhile still holds open for writing ("Text file busy").
+fn gh_dir() -> &'static Path {
+    static DIR: OnceLock<PathBuf> = OnceLock::new();
+    DIR.get_or_init(|| {
+        let bin = Path::new(env!("CARGO_TARGET_TMPDIR")).join("prs-bin");
+        std::fs::create_dir_all(&bin).unwrap();
+        let script = format!(
+            "#!/bin/sh\nif [ -n \"$GITHUB_TOKEN\" ]; then echo 'HTTP 401: Bad credentials' >&2; exit 1; fi\nif [ \"$1\" = api ]; then printf '%s\\n' \"$@\" >> \"$STUB/api.log\"; /bin/cat \"$STUB/talk.json\"; exit 0; fi\nif [ \"$2\" = view ]; then /bin/cat \"$STUB/view.json\"; exit 0; fi\nif [ \"$2\" = ready ] || [ \"$2\" = close ] || [ \"$2\" = reopen ]; then echo \"$@\" >> \"$STUB/changes.log\"; exit 0; fi\nif [ \"$2\" = merge ]; then echo \"$@\" >> \"$STUB/merges.log\"; if [ \"$3\" = 9 ]; then echo 'Pull request is not mergeable: the merge commit cannot be cleanly created.' >&2; exit 1; fi; exit 0; fi\necho '{LIST}'\n"
+        );
+        std::fs::write(bin.join("gh"), script).unwrap();
+        std::fs::set_permissions(bin.join("gh"), std::fs::Permissions::from_mode(0o755)).unwrap();
+        bin
+    })
 }
 
 impl Stub {
     fn new() -> Stub {
-        let root = tmp("ramulus-prs-");
-        let bin = root.join("bin");
-        std::fs::create_dir_all(&bin).unwrap();
-        let r = root.display();
-        let script = format!(
-            "#!/bin/sh\nif [ -n \"$GITHUB_TOKEN\" ]; then echo 'HTTP 401: Bad credentials' >&2; exit 1; fi\nif [ \"$1\" = api ]; then printf '%s\\n' \"$@\" >> \"{r}/api.log\"; /bin/cat \"{r}/talk.json\"; exit 0; fi\nif [ \"$2\" = view ]; then /bin/cat \"{r}/view.json\"; exit 0; fi\nif [ \"$2\" = ready ] || [ \"$2\" = close ] || [ \"$2\" = reopen ]; then echo \"$@\" >> \"{r}/changes.log\"; exit 0; fi\nif [ \"$2\" = merge ]; then echo \"$@\" >> \"{r}/merges.log\"; if [ \"$3\" = 9 ]; then echo 'Pull request is not mergeable: the merge commit cannot be cleanly created.' >&2; exit 1; fi; exit 0; fi\necho '{LIST}'\n"
-        );
-        std::fs::write(bin.join("gh"), script).unwrap();
-        std::fs::set_permissions(bin.join("gh"), std::fs::Permissions::from_mode(0o755)).unwrap();
-        Stub { root, bin }
+        gh_dir();
+        Stub { root: tmp("ramulus-prs-") }
     }
     fn env(&self, token: bool) -> ramulus::Env {
         let mut e = ramulus::Env::new();
-        e.insert("PATH".into(), self.bin.to_string_lossy().into_owned());
+        e.insert("PATH".into(), gh_dir().to_string_lossy().into_owned());
+        e.insert("STUB".into(), self.root.to_string_lossy().into_owned());
         if token {
             e.insert("GITHUB_TOKEN".into(), "stale".into());
         }
