@@ -6,7 +6,7 @@ import { PAGE, type Commit, type DiffArea, type FileChange, type NetSettings, ty
 import type { Scheme } from '../git/scheme'
 import { AiConsent, AiSettingsDialog } from './Ai'
 import { useAgentPanel } from './AgentPanel'
-import { BrandMark, CI_WORD, Icon, cannotFastForward, ciByCommit, ciState, clamp, laneColor, mergedBranches, prsByBranch, short, stored, webUrl, wipTally } from './bits'
+import { BrandMark, CI_WORD, Icon, RepoMark, cannotFastForward, ciByCommit, ciState, clamp, laneColor, mergedBranches, prsByBranch, short, stored, webUrl, wipTally } from './bits'
 import { DetailPanel, type FileSel } from './DetailPanel'
 import { PrCard } from './PrView'
 import { DiffWindow, tabKey, type DiffOptions, type DiffTab } from './DiffWindow'
@@ -1186,7 +1186,7 @@ export function App(p: { be: Backend; name: string; active: boolean; theme: Them
     <div class={`app ${panel.cls}`}>
       <div class="toolbar">
         <div class="tb-side">
-          <BrandMark />
+          <RepoMark url={v.data.originUrl} />
           <span class="repo">{v.data.name}</span>
           <button
             class={`branch ${v.data.headBranch ? '' : 'detached'}`}

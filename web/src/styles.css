@@ -357,6 +357,14 @@ select {
   color: var(--fg);
 }
 
+.repo-mark {
+  flex: none;
+  width: 20px;
+  height: 20px;
+  margin: 0 2px;
+  border-radius: 4px;
+}
+
 .tb-link {
   display: inline-flex;
   align-items: center;

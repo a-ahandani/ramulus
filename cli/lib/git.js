@@ -210,6 +210,7 @@ export async function load(dir, limit = 2000) {
     name: dir.split(/[\\/]/).filter(Boolean).pop(),
     headBranch,
     headOid,
+    originUrl: (await run(dir, ['remote', 'get-url', 'origin'], { allowFail: true })).stdout.trim() || undefined,
     commits: commits.slice(0, limit),
     refsByOid,
     local,
