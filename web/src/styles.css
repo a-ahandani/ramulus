@@ -346,14 +346,15 @@ select {
 
 .brand-mark {
   flex: none;
-  width: 20px;
+  width: 22px;
   height: 18px;
-  background: #d13667;
+  background: currentColor;
   mask: url('./mark.svg') center / contain no-repeat;
 }
 
 .toolbar .brand-mark {
   margin: 0 2px;
+  color: var(--fg);
 }
 
 .tb-link {
@@ -1499,7 +1500,7 @@ svg.codicon {
 }
 
 .welcome h1 .brand-mark {
-  width: 40px;
+  width: 44px;
   height: 36px;
 }
 
