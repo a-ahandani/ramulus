@@ -75,6 +75,7 @@ export function Shell() {
   // the saved preferences, open repositories among them, are written only once they have been read
   const [prefsReady, setPrefsReady] = useState(!helper)
   const [mergeMethod, setMergeMethod] = useState<MergeMethod>('merge')
+  const [keepAwake, setKeepAwake] = useState(true)
   const [summaries, setSummaries] = useState<Record<number, RepoSummary>>({})
   const [menu, setMenu] = useState<MenuState>()
   const [picker, setPicker] = useState(false)
@@ -117,8 +118,8 @@ export function Shell() {
       if (scheme) localStorage.setItem('ramulus.scheme', JSON.stringify(scheme))
       else localStorage.removeItem('ramulus.scheme')
     } catch {}
-    if (prefsReady) helper?.setPrefs({ theme, scheme: scheme ?? null, mergeMethod, open: openKeys.split('\n').filter(Boolean) }).catch(() => {})
-  }, [theme, scheme, mergeMethod, openKeys, prefsReady])
+    if (prefsReady) helper?.setPrefs({ theme, scheme: scheme ?? null, mergeMethod, keepAwake, open: openKeys.split('\n').filter(Boolean) }).catch(() => {})
+  }, [theme, scheme, mergeMethod, keepAwake, openKeys, prefsReady])
   useEffect(() => {
     document.title = current ? `${current.name} · Ramulus` : 'Ramulus'
   }, [current])
@@ -322,6 +323,7 @@ export function Shell() {
           if (prefs.theme === 'dark' || prefs.theme === 'light') setTheme(prefs.theme)
           setScheme(isScheme(prefs.scheme) ? prefs.scheme : undefined)
           if (isMergeMethod(prefs.mergeMethod)) setMergeMethod(prefs.mergeMethod)
+          if (typeof prefs.keepAwake === 'boolean') setKeepAwake(prefs.keepAwake)
           for (const r of pins) pinnedKeys.current.add(r.dir)
           // the repositories open when Ramulus last closed come back in their order, with the pinned ones
           const saved = Array.isArray(prefs.open) ? prefs.open.filter((d): d is string => typeof d === 'string') : []
@@ -421,6 +423,8 @@ export function Shell() {
               onSummary={(s) => setSummaries((m) => (sameSummary(m[t.id], s) ? m : { ...m, [t.id]: s }))}
               mergeMethod={mergeMethod}
               onMergeMethod={setMergeMethod}
+              keepAwake={keepAwake}
+              onKeepAwake={setKeepAwake}
             />
           </div>
         ))}

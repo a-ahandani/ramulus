@@ -124,6 +124,8 @@ export function createServer({ dir, root = dir, uiDir, token, stateFile = STATE 
     if ((await readAi()).enabled !== true) throw new Error('AI help is turned off')
   }
   const terms = createTerminals(join(dirname(stateFile), 'terms'))
+  const readPrefs = () => readFile(prefsFile, 'utf8').then(JSON.parse, () => ({}))
+  readPrefs().then((p) => terms.allowWake(p?.keepAwake), () => {})
   const ops = {
     ...OPS,
     aiContext: (repo, b) => git.aiContext(repo, b.task, { at: b.at }),
@@ -152,12 +154,13 @@ export function createServer({ dir, root = dir, uiDir, token, stateFile = STATE 
       await mkdir(dirname(pinFile), { recursive: true })
       await writeFile(pinFile, JSON.stringify(dirs))
     },
-    prefs: () => readFile(prefsFile, 'utf8').then(JSON.parse, () => ({})),
+    prefs: readPrefs,
     setPrefs: async (b) => {
       const text = JSON.stringify(b.prefs && typeof b.prefs === 'object' ? b.prefs : {})
       if (text.length > 20000) throw new Error('Preferences are too large')
       await mkdir(dirname(prefsFile), { recursive: true })
       await writeFile(prefsFile, text)
+      terms.allowWake(b.prefs?.keepAwake)
     },
     findRepos: async () => {
       const at = dir ?? root

@@ -145,7 +145,8 @@ export function createTerminals(dir) {
   const working = (now = Date.now()) =>
     [...sessions.values()].some((s) => s.kind === 'agent' && s.proc && !s.exit && (s.agent === 'claude' ? claudeBusy(s.title) : now - (s.lastOutput ?? 0) < QUIET))
   const wake = createWake()
-  const waking = setInterval(() => wake(working()), WAKE_EVERY)
+  let awake = true
+  const waking = setInterval(() => wake(awake && working()), WAKE_EVERY)
   waking.unref()
 
   // closes a tab for good: its program ends and its saved output goes
@@ -255,6 +256,11 @@ export function createTerminals(dir) {
       if (id !== undefined) stopKey(key(repo, id))
       else for (const k of [...sessions.keys()]) if (k.startsWith(`${repo}\n`)) stopKey(k)
       save(false)
+    },
+    // the person's Keep awake switch: off lets the computer sleep at once, even while an agent works
+    allowWake(on) {
+      awake = on !== false
+      if (!awake) wake(false)
     },
     // saves every tab for the next run, then ends their programs: the helper shutting down, not tabs closing
     stopAll() {
