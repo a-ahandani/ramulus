@@ -243,6 +243,11 @@ impl Drop for WatchGuard {
     }
 }
 
+/// The Keep awake switch in prefs.json: on unless the person turned it off.
+fn keep_awake(prefs: &Value) -> bool {
+    prefs.get("keepAwake").and_then(Value::as_bool) != Some(false)
+}
+
 impl App {
     pub fn new(cfg: Config) -> Arc<App> {
         let cwd = std::env::current_dir().unwrap_or_default();
@@ -259,6 +264,7 @@ impl App {
         if let Some(d) = &app.cfg.dir {
             let _ = app.remember(d);
         }
+        app.terms.allow_wake(keep_awake(&app.prefs()));
         app
     }
 
@@ -269,6 +275,13 @@ impl App {
 
     fn beside(&self, name: &str) -> PathBuf {
         self.cfg.state_file.with_file_name(name)
+    }
+
+    fn prefs(&self) -> Value {
+        std::fs::read_to_string(self.beside("prefs.json"))
+            .ok()
+            .and_then(|t| serde_json::from_str(&t).ok())
+            .unwrap_or_else(|| json!({}))
     }
 
     fn read_recent(&self) -> Vec<String> {
@@ -321,10 +334,7 @@ impl App {
                 write_text(&self.beside("pinned.json"), &serde_json::to_string(&dirs)?)?;
                 done()
             }
-            "prefs" => Ok(std::fs::read_to_string(self.beside("prefs.json"))
-                .ok()
-                .and_then(|t| serde_json::from_str(&t).ok())
-                .unwrap_or_else(|| json!({}))),
+            "prefs" => Ok(self.prefs()),
             "setPrefs" => {
                 let p = b.get("prefs");
                 let empty = json!({});
@@ -333,6 +343,7 @@ impl App {
                     return err("Preferences are too large");
                 }
                 write_text(&self.beside("prefs.json"), &text)?;
+                self.terms.allow_wake(keep_awake(p));
                 done()
             }
             "findRepos" => {

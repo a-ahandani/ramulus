@@ -18,7 +18,7 @@ Run it inside any git repository, or pass a path: `npx ramulus ~/code/app`. Run 
 
 - **Visual control while your agent codes.** Let Claude Code, Codex, Gemini CLI or opencode write the code in a panel beside the graph. Every edit shows up as a diff and every branch as a lane, so you review what it did and choose what to stage and commit.
 - **Your git, unchanged.** Every operation runs through the git binary you already use, so SSH keys, credential helpers, hooks and LFS behave exactly as they do in the terminal.
-- **Nothing leaves your machine unless you ask.** The server listens on 127.0.0.1 and every request carries a per-run token. The only outside requests are your own git remotes, avatar lookups on gravatar.com, pull request and Actions run lookups through the GitHub CLI when you have it installed, the images, videos and avatars of a pull request you open, which load only from GitHub's own hosts, and, if you turn it on, the AI agent you already use.
+- **Nothing leaves your machine unless you ask.** The server listens on 127.0.0.1 and every request carries a per-run token. The only outside requests are your own git remotes, avatar lookups on gravatar.com, the avatar of the GitHub account that owns a repository's origin, pull request and Actions run lookups through the GitHub CLI when you have it installed, the images, videos and avatars of a pull request you open, which load only from GitHub's own hosts, and, if you turn it on, the AI agent you already use.
 - **One command.** No installer, no sign-in, no license key. Close the terminal and it is gone.
 
 Ramulus is Latin for a small branch.

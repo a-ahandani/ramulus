@@ -1,5 +1,6 @@
 //! Keeps the computer from going to sleep on its own while an AI agent works.
 use std::process::{Child, Command, Stdio};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 
 /// The system's own way to keep it awake; each one also ends when the helper does, even if it crashes.
@@ -39,10 +40,13 @@ fn command(pid: u32) -> Command {
 pub struct Wake {
     /// the running tool, and whether it failed once
     state: Mutex<(Option<Child>, bool)>,
+    /// the person turned the Keep awake switch off
+    paused: AtomicBool,
 }
 
 impl Wake {
     pub fn set(&self, on: bool) {
+        let on = on && !self.paused.load(Ordering::Relaxed);
         let mut st = self.state.lock().unwrap();
         let (child, broken) = &mut *st;
         if child.as_mut().is_some_and(|c| !matches!(c.try_wait(), Ok(None))) {
@@ -59,6 +63,14 @@ impl Wake {
                 let _ = c.kill();
                 let _ = c.wait();
             }
+        }
+    }
+
+    /// The Keep awake switch: off lets the computer sleep at once, even while an agent works.
+    pub fn pause(&self, paused: bool) {
+        self.paused.store(paused, Ordering::Relaxed);
+        if paused {
+            self.set(false);
         }
     }
 }

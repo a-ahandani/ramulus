@@ -748,6 +748,11 @@ impl Terminals {
         working(&self.sessions, quiet)
     }
 
+    /// The person's Keep awake switch, read from prefs.json.
+    pub fn allow_wake(&self, on: bool) {
+        self.wake.pause(!on);
+    }
+
     /// Saves every tab for the next run, then ends their programs; this is the helper shutting down, not tabs closing.
     pub fn stop_all(&self) {
         self.wake.set(false);

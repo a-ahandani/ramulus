@@ -373,6 +373,9 @@ pub struct RepoData {
     pub head_branch: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub head_oid: Option<String>,
+    /// where `origin` points, so the toolbar can show the GitHub owner's avatar
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub origin_url: Option<String>,
     pub commits: Vec<Commit>,
     pub refs_by_oid: HashMap<String, Vec<RefLabel>>,
     pub local: Vec<BranchInfo>,
@@ -401,15 +404,17 @@ pub async fn load(dir: &str, limit: usize) -> Result<RepoData> {
         "refs/tags",
     ];
     // these read different things, so they run at once; the log waits for the stash list it must skip past
-    let (head_branch, head_oid, refs, stash_list, status) = tokio::join!(
+    let (head_branch, head_oid, origin_url, refs, stash_list, status) = tokio::join!(
         text_or_empty(dir, &["symbolic-ref", "-q", "--short", "HEAD"]),
         text_or_empty(dir, &["rev-parse", "-q", "--verify", "HEAD"]),
+        text_or_empty(dir, &["remote", "get-url", "origin"]),
         run(dir, &refs_args, None),
         try_run(dir, &["stash", "list", "--format=%H%x00%s"], None),
         status(dir),
     );
     let head_branch = Some(head_branch?).filter(|s| !s.is_empty());
     let head_oid = Some(head_oid?).filter(|s| !s.is_empty());
+    let origin_url = Some(origin_url?).filter(|s| !s.is_empty());
     let mut refs_by_oid: HashMap<String, Vec<RefLabel>> = HashMap::new();
     let (mut local, mut remote, mut tags) = (vec![], vec![], vec![]);
     let refs = refs?.text();
@@ -492,6 +497,7 @@ pub async fn load(dir: &str, limit: usize) -> Result<RepoData> {
         name: dir.split(['/', '\\']).rfind(|s: &&str| !s.is_empty()).unwrap_or("").to_string(),
         head_branch,
         head_oid,
+        origin_url,
         commits,
         refs_by_oid,
         local,

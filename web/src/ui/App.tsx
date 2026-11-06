@@ -6,7 +6,7 @@ import { PAGE, type Commit, type DiffArea, type FileChange, type NetSettings, ty
 import type { Scheme } from '../git/scheme'
 import { AiConsent, AiSettingsDialog } from './Ai'
 import { useAgentPanel } from './AgentPanel'
-import { BrandMark, CI_WORD, Icon, cannotFastForward, ciByCommit, ciState, clamp, laneColor, mergedBranches, prsByBranch, short, stored, webUrl, wipTally } from './bits'
+import { BrandMark, CI_WORD, Icon, RepoMark, cannotFastForward, ciByCommit, ciState, clamp, laneColor, mergedBranches, prsByBranch, short, stored, webUrl, wipTally } from './bits'
 import { DetailPanel, type FileSel } from './DetailPanel'
 import { PrCard } from './PrView'
 import { DiffWindow, tabKey, type DiffOptions, type DiffTab } from './DiffWindow'
@@ -81,7 +81,7 @@ export interface TabApi {
 
 const notGit = (e: unknown) => /not a git repository/i.test(e instanceof Error ? e.message : String(e))
 
-export function App(p: { be: Backend; name: string; active: boolean; theme: Theme; onTheme: (t: Theme) => void; scheme?: Scheme; onScheme: (s?: Scheme) => void; onOpenRepo: () => void; onDirty: (dirty: boolean) => void; onApi: (api: TabApi) => void; onSearchRepos: () => void; onAll: (kind: 'pull' | 'fetch') => void; mergeMethod: MergeMethod; onMergeMethod: (m: MergeMethod) => void; onSummary: (s: RepoSummary) => void }) {
+export function App(p: { be: Backend; name: string; active: boolean; theme: Theme; onTheme: (t: Theme) => void; scheme?: Scheme; onScheme: (s?: Scheme) => void; onOpenRepo: () => void; onDirty: (dirty: boolean) => void; onApi: (api: TabApi) => void; onSearchRepos: () => void; onAll: (kind: 'pull' | 'fetch') => void; mergeMethod: MergeMethod; onMergeMethod: (m: MergeMethod) => void; keepAwake: boolean; onKeepAwake: (on: boolean) => void; onSummary: (s: RepoSummary) => void }) {
   const theme = p.theme
   const look = p.scheme ? `scheme:${p.scheme.id}` : theme
   const setTheme = (t: Theme) => {
@@ -1078,6 +1078,12 @@ export function App(p: { be: Backend; name: string; active: boolean; theme: Them
       Agent
     </button>
   )
+  const awakeSwitch = (
+    <button class="switch" role="switch" aria-checked={p.keepAwake} onClick={() => p.onKeepAwake(!p.keepAwake)} title={p.keepAwake ? 'Keep awake is on: the computer stays awake while an agent works' : 'Keep awake is off: the computer may sleep while an agent works'}>
+      <Icon name="coffee" />
+      <span class="track" aria-hidden="true" />
+    </button>
+  )
 
   if (!view) {
     return (
@@ -1090,7 +1096,10 @@ export function App(p: { be: Backend; name: string; active: boolean; theme: Them
                 <span class="repo">{p.name}</span>
               </div>
               <div />
-              <div class="tb-side tb-end">{p.be.termStart && agentButton}</div>
+              <div class="tb-side tb-end">
+                {p.be.termStart && awakeSwitch}
+                {p.be.termStart && agentButton}
+              </div>
             </>
           )}
         </div>
@@ -1186,7 +1195,7 @@ export function App(p: { be: Backend; name: string; active: boolean; theme: Them
     <div class={`app ${panel.cls}`}>
       <div class="toolbar">
         <div class="tb-side">
-          <BrandMark />
+          <RepoMark url={v.data.originUrl} />
           <span class="repo">{v.data.name}</span>
           <button
             class={`branch ${v.data.headBranch ? '' : 'detached'}`}
@@ -1241,6 +1250,7 @@ export function App(p: { be: Backend; name: string; active: boolean; theme: Them
               <Icon name="settings-gear" />
             </button>
           )}
+          {v.be.termStart && awakeSwitch}
           {agentButton}
         </div>
       </div>

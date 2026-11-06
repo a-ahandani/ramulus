@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { ago, cannotFastForward, ciByCommit, ciState, finished, mergedBranches, prsByBranch, sessionMeta, settleLimited, termTitle, tokenCount, webUrl, wipTally } from './bits'
+import { ago, cannotFastForward, ciByCommit, ciState, finished, githubOwner, mergedBranches, prsByBranch, sessionMeta, settleLimited, termTitle, tokenCount, webUrl, wipTally } from './bits'
 
 describe('settleLimited', () => {
   it('never runs more than the limit at once and keeps results in order', async () => {
@@ -45,6 +45,16 @@ describe('webUrl', () => {
     expect(webUrl('https://github.com/o/r/actions/runs/1')).toBe('https://github.com/o/r/actions/runs/1')
     expect(webUrl('HTTP://ci.example/log')).toBe('HTTP://ci.example/log')
     for (const bad of ['javascript:alert(1)', ' javascript:alert(1)', 'data:text/html,<script>', 'vbscript:x', '//evil.example', '']) expect(webUrl(bad)).toBeUndefined()
+  })
+})
+
+describe('githubOwner', () => {
+  it('reads the owner from https, ssh and scp-style GitHub remotes only', () => {
+    expect(githubOwner('https://github.com/a-ahandani/ramulus.git')).toBe('a-ahandani')
+    expect(githubOwner('https://user:token@github.com/Org/repo')).toBe('Org')
+    expect(githubOwner('git@github.com:anthropics/claude-code.git')).toBe('anthropics')
+    expect(githubOwner('ssh://git@github.com/org/repo.git')).toBe('org')
+    for (const other of ['https://gitlab.com/o/r.git', 'https://github.com.evil.example/o/r', 'https://notgithub.com/o/r', 'git@github.com:o', '', undefined]) expect(githubOwner(other)).toBeUndefined()
   })
 })
 

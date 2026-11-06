@@ -141,6 +141,17 @@ export function BrandMark() {
   return <span class="brand-mark" aria-hidden="true" />
 }
 
+/** the GitHub user or organization that owns a remote, from an https, ssh or scp-style URL */
+export const githubOwner = (url = '') => /^(?:[a-z+]+:\/\/)?(?:[^@/]+@)?github\.com[:/]([a-z0-9-]+)\//i.exec(url)?.[1]
+
+/** the repository owner's GitHub avatar, or the Ramulus mark when origin is not on GitHub or the avatar does not load */
+export function RepoMark({ url }: { url?: string }) {
+  const owner = githubOwner(url)
+  const [failed, setFailed] = useState<string>()
+  if (!owner || failed === owner) return <BrandMark />
+  return <img class="repo-mark" src={`https://github.com/${owner}.png?size=64`} alt="" title={owner} onError={() => setFailed(owner)} />
+}
+
 export function BrandLinks() {
   return (
     <>

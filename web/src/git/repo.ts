@@ -65,6 +65,8 @@ export interface RepoData {
   name: string
   headBranch?: string
   headOid?: string
+  /** where `origin` points, so the toolbar can show the GitHub owner's avatar */
+  originUrl?: string
   commits: Commit[]
   refsByOid: Map<string, RefLabel[]>
   local: BranchInfo[]
@@ -245,7 +247,8 @@ export async function load(ctx: Ctx, limit = PAGE): Promise<RepoData> {
     })
   }
   const name = dir.split('/').filter(Boolean).pop() ?? dir
-  return { name, headBranch, headOid, commits, refsByOid, local, remote, tags, stashes, status: await status(ctx), hasMore }
+  const originUrl: string | undefined = (await git.getConfig({ fs, dir, path: 'remote.origin.url' })) || undefined
+  return { name, headBranch, headOid, originUrl, commits, refsByOid, local, remote, tags, stashes, status: await status(ctx), hasMore }
 }
 
 export async function commitFiles(ctx: Ctx, oid: string): Promise<FileChange[]> {
