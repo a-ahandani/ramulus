@@ -155,19 +155,19 @@ fn runs_the_agent_in_a_terminal_and_streams_what_it_prints() {
     let (_root, repo, srv) = ai_server();
     srv.result("setAi", json!({ "settings": { "enabled": true } }));
     assert_eq!(srv.result("termStart", json!({ "agent": "claude", "cols": 80, "rows": 24 }))["fresh"], true);
-    let mut stream = srv.term_stream(s(&repo), "main");
-    srv.result("termInput", json!({ "data": "hello ramulus\r" }));
+    let mut stream = srv.term(s(&repo), "main");
+    stream.input("hello ramulus\r");
     stream.until("hello ramulus");
     assert_eq!(srv.result("termStart", json!({ "agent": "claude", "cols": 100, "rows": 30 }))["fresh"], false);
     srv.result("termStop", json!({}));
-    stream.until("event: exit");
+    stream.until(r#""exit":"#);
 }
 
 #[test]
 fn keeps_each_terminal_tab_separate_and_stops_them_one_at_a_time() {
     let (_root, repo, srv) = ai_server();
     srv.result("setAi", json!({ "settings": { "enabled": true } }));
-    let stream = |id: &str| srv.term_stream(s(&repo), id);
+    let stream = |id: &str| srv.term(s(&repo), id);
     assert_eq!(srv.result("termStart", json!({ "id": "one", "agent": "claude", "cols": 80, "rows": 24 }))["fresh"], true);
     assert_eq!(srv.result("termStart", json!({ "id": "two", "agent": "claude", "cols": 80, "rows": 24 }))["fresh"], true);
     // Windows' cmd.exe names its window as it starts, so the titles can be there already
@@ -179,28 +179,40 @@ fn keeps_each_terminal_tab_separate_and_stops_them_one_at_a_time() {
     );
     let mut one = stream("one");
     let mut two = stream("two");
-    srv.result("termInput", json!({ "id": "two", "data": "only in two\r" }));
+    two.input("only in two\r");
     two.until("only in two");
-    srv.result("termInput", json!({ "id": "one", "data": "only in one\r" }));
+    one.input("only in one\r");
     one.until("only in one");
     assert!(!one.seen.contains("only in two"));
     srv.result("termStop", json!({ "id": "one" }));
-    one.until("event: exit");
-    srv.result("termInput", json!({ "id": "two", "data": "still here\r" }));
+    one.until(r#""exit":"#);
+    two.input("still here\r");
     two.until("still here");
     assert!(srv.error("termStart", json!({ "id": "Bad Id", "agent": "claude" })).contains("Invalid terminal id"));
     srv.result("termStop", json!({ "all": true }));
-    two.until("event: exit");
+    two.until(r#""exit":"#);
 }
 
 #[cfg(unix)]
 #[test]
 fn opens_a_plain_shell_tab_without_the_ai_setting() {
-    let (_root, _repo, srv) = ai_server();
+    let (_root, repo, srv) = ai_server();
     srv.result("setAi", json!({ "settings": { "enabled": false, "prompts": {} } }));
     assert!(srv.error("termStart", json!({ "id": "agent", "agent": "claude" })).contains("turned off"));
     assert!(srv.result("termStart", json!({ "id": "sh", "kind": "shell", "cols": 80, "rows": 24 }))["agent"].is_null());
+    let mut sh = srv.term(s(&repo), "sh");
+    sh.resize(100, 30);
+    sh.input("stty size\r");
+    sh.until("30 100");
     srv.result("termStop", json!({ "id": "sh" }));
+}
+
+#[test]
+fn refuses_a_terminal_socket_without_the_token_or_for_a_folder_not_opened() {
+    let (root, _repo, srv) = ai_server();
+    let bad = tungstenite::connect(format!("{}/api/term?token=nope", srv.base.replacen("http", "ws", 1)));
+    assert!(matches!(bad, Err(tungstenite::Error::Http(r)) if r.status() == 401));
+    srv.term(s(&root.join("other")), "main").until(r#"{"ch":1,"exit":null}"#);
 }
 
 #[test]
@@ -208,14 +220,16 @@ fn replays_what_a_terminal_printed_before_the_tab_attached() {
     let (_root, repo, srv) = ai_server();
     srv.result("setAi", json!({ "settings": { "enabled": true } }));
     srv.result("termStart", json!({ "id": "late", "agent": "claude", "cols": 80, "rows": 24 }));
-    srv.result("termInput", json!({ "id": "late", "data": "typed before attach\r" }));
-    std::thread::sleep(std::time::Duration::from_millis(500));
-    let mut stream = srv.term_stream(s(&repo), "late");
+    let mut typing = srv.term(s(&repo), "late");
+    typing.input("typed before attach\r");
+    typing.until("typed before attach");
+    let mut stream = srv.term(s(&repo), "late");
     stream.until("typed before attach");
+    assert!(stream.seen.starts_with(r#"{"ch":1,"replay":"#), "{}", stream.seen);
     srv.result("termStop", json!({ "id": "late" }));
-    stream.until("event: exit");
-    let mut gone = srv.term_stream(s(&repo), "late");
-    gone.until("event: exit\ndata: null");
+    stream.until(r#""exit":"#);
+    let mut gone = srv.term(s(&repo), "late");
+    gone.until(r#"{"ch":1,"exit":null}"#);
 }
 
 #[test]

@@ -2,6 +2,7 @@ use crate::git::{self, DiffArea, FileChange};
 use crate::term::Terminals;
 use crate::{ai, err, home, prs, resolve, sessions, Env, Error, Result};
 use axum::body::Bytes;
+use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::extract::{DefaultBodyLimit, Path as UrlPath, Query, Request, State};
 use axum::http::{header, HeaderMap, Method, StatusCode};
 use axum::middleware::{self, Next};
@@ -55,7 +56,7 @@ pub struct App {
 }
 
 const SHELL_OPS: [&str; 10] = ["repos", "pins", "setPins", "prefs", "setPrefs", "findRepos", "pickFolder", "ai", "setAi", "openRepo"];
-const REPO_OPS: [&str; 52] = [
+const REPO_OPS: [&str; 50] = [
     "load",
     "init",
     "files",
@@ -104,8 +105,6 @@ const REPO_OPS: [&str; 52] = [
     "termStart",
     "termList",
     "agentSessions",
-    "termInput",
-    "termResize",
     "termStop",
     "aiAsk",
 ];
@@ -469,14 +468,6 @@ impl App {
             }
             "termList" => val(self.terms.list(repo)),
             "agentSessions" => val(sessions::agent_sessions(repo, self.terms.held(repo), env).await),
-            "termInput" => {
-                self.terms.write(repo, &term_id(b.get("id"))?, b.string("data")).await;
-                done()
-            }
-            "termResize" => {
-                self.terms.resize(repo, &term_id(b.get("id"))?, b.i64("cols"), b.i64("rows"));
-                done()
-            }
             "termStop" => {
                 if b.truthy("all") {
                     self.terms.stop(repo, None);
@@ -567,12 +558,86 @@ async fn events(State(app): State<Arc<App>>, Query(q): Query<HashMap<String, Str
     Sse::new(stream).into_response()
 }
 
-async fn term_stream(State(app): State<Arc<App>>, Query(q): Query<HashMap<String, String>>) -> Response {
-    let id = q.get("id").cloned().unwrap_or_else(|| "main".into());
-    let Some(repo) = stream_target(&app, &q).filter(|_| valid_term_id(&id)) else {
+async fn term_socket(State(app): State<Arc<App>>, Query(q): Query<HashMap<String, String>>, ws: WebSocketUpgrade) -> Response {
+    if q.get("token") != Some(&app.cfg.token) {
         return StatusCode::UNAUTHORIZED.into_response();
-    };
-    Sse::new(app.terms.attach(&repo, &id)).into_response()
+    }
+    ws.on_upgrade(move |socket| terminals(app, socket))
+}
+
+/// A tab the page attached on its socket: where its typing goes, and the task sending its output.
+struct Channel {
+    input: mpsc::UnboundedSender<String>,
+    output: tokio::task::JoinHandle<()>,
+}
+
+/// One socket carries every terminal tab the page shows, each on a channel number the page picks: `attach` starts the
+/// tab's output, `input` and `resize` go to it, `detach` ends it. Keystrokes stop waiting behind other requests.
+async fn terminals(app: Arc<App>, mut socket: WebSocket) {
+    let (tx, mut rx) = mpsc::channel::<String>(256);
+    let mut chans: HashMap<u64, (String, String, Channel)> = HashMap::new();
+    loop {
+        let text = tokio::select! {
+            Some(out) = rx.recv() => {
+                if socket.send(Message::Text(out.into())).await.is_err() {
+                    break;
+                }
+                continue;
+            }
+            msg = socket.recv() => match msg {
+                Some(Ok(Message::Text(t))) => t,
+                Some(Ok(Message::Close(_)) | Err(_)) | None => break,
+                Some(Ok(_)) => continue,
+            },
+        };
+        let Ok(v) = serde_json::from_str::<Value>(text.as_str()) else { continue };
+        let b = Body(&v);
+        let Some(ch) = b.i64("ch").and_then(|c| u64::try_from(c).ok()) else { continue };
+        match b.str("op") {
+            Some("attach") => {
+                if let Some((.., old)) = chans.remove(&ch) {
+                    old.output.abort();
+                }
+                let repo = b.str("repo").map(str::to_string).or_else(|| app.cfg.dir.clone());
+                let (Some(repo), Ok(id)) = (repo.filter(|r| app.known.lock().unwrap().contains(r)), term_id(b.get("id"))) else {
+                    if socket.send(Message::Text(json!({ "ch": ch, "exit": null }).to_string().into())).await.is_err() {
+                        break;
+                    }
+                    continue;
+                };
+                // typing goes through its own queue, so a program that stops reading holds up only its own tab
+                let (input, mut typed) = mpsc::unbounded_channel::<String>();
+                let (a, r, i) = (app.clone(), repo.clone(), id.clone());
+                tokio::spawn(async move {
+                    while let Some(d) = typed.recv().await {
+                        a.terms.write(&r, &i, d).await;
+                    }
+                });
+                let (a, r, i, out) = (app.clone(), repo.clone(), id.clone(), tx.clone());
+                let output = tokio::spawn(async move { a.terms.forward(&r, &i, ch, out).await });
+                chans.insert(ch, (repo, id, Channel { input, output }));
+            }
+            Some("input") => {
+                if let Some((.., c)) = chans.get(&ch) {
+                    let _ = c.input.send(b.string("data"));
+                }
+            }
+            Some("resize") => {
+                if let Some((repo, id, _)) = chans.get(&ch) {
+                    app.terms.resize(repo, id, b.i64("cols"), b.i64("rows"));
+                }
+            }
+            Some("detach") => {
+                if let Some((.., c)) = chans.remove(&ch) {
+                    c.output.abort();
+                }
+            }
+            _ => {}
+        }
+    }
+    for (.., c) in chans.into_values() {
+        c.output.abort();
+    }
 }
 
 async fn static_file(State(app): State<Arc<App>>, req: Request) -> Response {
@@ -601,7 +666,7 @@ async fn static_file(State(app): State<Arc<App>>, req: Request) -> Response {
 pub fn router(app: Arc<App>) -> Router {
     Router::new()
         .route("/api/events", get(events))
-        .route("/api/term", get(term_stream))
+        .route("/api/term", get(term_socket))
         .route("/api/{op}", any(api))
         .fallback(static_file)
         .layer(middleware::from_fn(host_check))

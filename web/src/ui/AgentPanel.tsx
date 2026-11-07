@@ -43,6 +43,12 @@ export function useAgentPanel(p: {
   const looking = p.active && shown ? activeTerm?.id : undefined
   const lookingRef = useRef(looking)
   lookingRef.current = looking
+  // A tab's terminal is made the first time it shows and then kept behind the others, so coming back to it, to this
+  // repository or to the panel is instant.
+  const made = useRef(new Set<string>())
+  if (looking && !history) made.current.add(looking)
+  const drawer = useRef<HTMLDivElement>(null)
+  const dragged = useRef(height)
 
   useEffect(() => {
     localStorage.setItem('ramulus.drawer', String(height))
@@ -123,6 +129,7 @@ export function useAgentPanel(p: {
 
   const close = (id: string) => {
     p.be.termStop?.(id).catch(() => {})
+    made.current.delete(id)
     const rest = terms.filter((t) => t.id !== id)
     setTerms(rest)
     unwait([id])
@@ -136,6 +143,7 @@ export function useAgentPanel(p: {
 
   const closeAll = () => {
     p.be.termStop?.().catch(() => {})
+    made.current.clear()
     setPaste(undefined)
     setTerms([])
     setWaiting(new Set())
@@ -187,9 +195,19 @@ export function useAgentPanel(p: {
     return () => clearInterval(timer)
   }, [watching, terms.length])
 
-  const view = (history || activeTerm) && shown && p.active && (
-    <div class="agent-drawer" style={max ? undefined : { height: `${height}px` }}>
-      {!max && <Splitter horizontal onDrag={(dy) => setHeight((h) => clamp(h - dy, 120, innerHeight - 200))} />}
+  const view = (history || activeTerm) && (
+    <div ref={drawer} class="agent-drawer" hidden={!shown} style={max ? undefined : { height: `${height}px` }}>
+      {!max && (
+        <Splitter
+          horizontal
+          // the drag moves only the panel; the rest of the window renders again once, when it ends
+          onDrag={(dy) => {
+            dragged.current = clamp(dragged.current - dy, 120, innerHeight - 200)
+            drawer.current!.style.height = `${dragged.current}px`
+          }}
+          onEnd={() => setHeight(dragged.current)}
+        />
+      )}
       <div class="drawer-head">
         <div class="term-tabs" role="tablist" aria-label="Agent and terminal tabs">
           {terms.map((t) => (
@@ -252,7 +270,7 @@ export function useAgentPanel(p: {
           <Icon name="chevron-down" />
         </button>
       </div>
-      {history || !activeTerm ? (
+      {(history || !activeTerm) && (
         <div class="past" role="tabpanel" aria-label="Agent conversations to resume">
           {past.length > 0 && (
             <div class="past-search">
@@ -283,23 +301,27 @@ export function useAgentPanel(p: {
             {!found.length && <div class="past-empty">{past.length ? 'No conversation matches that.' : 'No other agent conversations in this folder.'}</div>}
           </div>
         </div>
-      ) : (
-      <AgentTerminal
-        key={activeTerm.id}
-        be={p.be}
-        id={activeTerm.id}
-        kind={activeTerm.kind}
-        agent={activeTerm.agent}
-        resume={activeTerm.resume}
-        look={p.look}
-        focus={focus}
-        onFocused={() => setFocus(false)}
-        paste={paste?.tab === activeTerm.id ? paste : undefined}
-        restart={restart.tab === activeTerm.id ? restart.n : 0}
-        onState={(st) => setTermRunning((m) => ({ ...m, [activeTerm.id]: st.running }))}
-        onPasted={() => setPaste(undefined)}
-      />
       )}
+      {terms
+        .filter((t) => made.current.has(t.id))
+        .map((t) => (
+          <AgentTerminal
+            key={t.id}
+            be={p.be}
+            id={t.id}
+            kind={t.kind}
+            agent={t.agent}
+            resume={t.resume}
+            look={p.look}
+            shown={!history && t.id === activeTerm?.id}
+            focus={focus && t.id === activeTerm?.id}
+            onFocused={() => setFocus(false)}
+            paste={paste?.tab === t.id ? paste : undefined}
+            restart={restart.tab === t.id ? restart.n : 0}
+            onState={(st) => setTermRunning((m) => ({ ...m, [t.id]: st.running }))}
+            onPasted={() => setPaste(undefined)}
+          />
+        ))}
     </div>
   )
 

@@ -2459,6 +2459,11 @@ button.sb-empty.open {
   background: var(--bg);
 }
 
+.agent-drawer[hidden],
+.agent-term[hidden] {
+  display: none;
+}
+
 .splitter.horizontal {
   position: absolute;
   top: -3px;

@@ -33,13 +33,13 @@ fn brings_terminal_tabs_back_after_the_helper_restarts() {
     let srv = start();
     srv.result("setAi", json!({ "settings": { "enabled": true } }));
     srv.result("termStart", json!({ "id": "sh", "kind": "shell", "cols": 80, "rows": 24 }));
-    let mut sh = srv.term_stream(s(&repo), "sh");
-    srv.result("termInput", json!({ "id": "sh", "data": "echo kept-$((40+2))\r" }));
+    let mut sh = srv.term(s(&repo), "sh");
+    sh.input("echo kept-$((40+2))\r");
     sh.until("kept-42");
     // a second helper beside this one leaves its saved tabs alone
     assert_eq!(start().result("termList", json!({})), json!([]));
     srv.result("termStart", json!({ "id": "ai", "agent": "claude", "cols": 80, "rows": 24 }));
-    let mut ai = srv.term_stream(s(&repo), "ai");
+    let mut ai = srv.term(s(&repo), "ai");
     ai.until("args:--session-id ");
     let at = ai.seen.find("args:--session-id ").unwrap() + 18;
     ai.until("\\r\\n");
@@ -60,11 +60,11 @@ fn brings_terminal_tabs_back_after_the_helper_restarts() {
     let again = start();
     assert_eq!(again.result("termList", json!({})), titled);
     assert_eq!(again.result("termStart", json!({ "id": "sh", "kind": "shell", "cols": 80, "rows": 24 }))["fresh"], true);
-    let mut sh = again.term_stream(s(&repo), "sh");
+    let mut sh = again.term(s(&repo), "sh");
     sh.until("kept-42");
     sh.until("new session");
     again.result("termStart", json!({ "id": "ai", "agent": "claude", "cols": 80, "rows": 24 }));
-    again.term_stream(s(&repo), "ai").until(&format!("args:--resume {uuid}"));
+    again.term(s(&repo), "ai").until(&format!("args:--resume {uuid}"));
     again.result("termStop", json!({ "id": "sh" }));
     again.app.stop_agents();
 

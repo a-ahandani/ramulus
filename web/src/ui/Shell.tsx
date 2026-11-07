@@ -91,6 +91,8 @@ export function Shell() {
     setShown(false)
   }
   const [sideW, setSideW] = useState(() => Number(localStorage.getItem('ramulus.sidebarw')) || 230)
+  const shellEl = useRef<HTMLDivElement>(null)
+  const draggedW = useRef(sideW)
   const [searchTick, setSearchTick] = useState(0)
   const [running, setRunning] = useState<string>()
   const [status, setStatus] = useState<string>()
@@ -368,7 +370,7 @@ export function Shell() {
     : handles.map((h, i) => ({ key: `h${i}`, name: h.name, title: h.name, open: () => openHandle(h).catch((e) => fail('Could not open the folder', e)) }))
 
   return (
-    <div class={`shell ${docked ? 'with-sidebar' : ''}`} style={{ '--sb-w': `${sideW}px` }}>
+    <div ref={shellEl} class={`shell ${docked ? 'with-sidebar' : ''}`} style={{ '--sb-w': `${sideW}px` }}>
       {!docked && <div class="sb-edge" onMouseEnter={reveal} />}
       <Sidebar
         tabs={tabs.map((t) => ({ id: t.id, name: t.name, title: t.title, pinned: t.pinned, dirty: dirty.has(t.id), summary: summaries[t.id] }))}
@@ -403,7 +405,16 @@ export function Shell() {
         onEnter={reveal}
         onLeave={() => !docked && conceal()}
       />
-      {docked && <Splitter onDrag={(dx) => setSideW((w) => Math.min(480, Math.max(170, w + dx)))} />}
+      {docked && (
+        <Splitter
+          // the drag moves only the sidebar's edge; the repositories render again once, when it ends
+          onDrag={(dx) => {
+            draggedW.current = Math.min(480, Math.max(170, draggedW.current + dx))
+            shellEl.current!.style.setProperty('--sb-w', `${draggedW.current}px`)
+          }}
+          onEnd={() => setSideW(draggedW.current)}
+        />
+      )}
       <div class="shell-main">
         {tabs.map((t) => (
           <div key={t.id} class="tab-page" hidden={t.id !== active}>

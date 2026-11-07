@@ -72,8 +72,8 @@ export function createTerminals(dir) {
   const sessions = new Map()
   let seq = 0
   const key = (repo, id) => `${repo}\n${id}`
-  const send = (s, event, data) => {
-    for (const res of s.clients) res.write(`${event ? `event: ${event}\n` : ''}data: ${JSON.stringify(data)}\n\n`)
+  const send = (s, msg) => {
+    for (const fn of s.clients) fn(msg)
   }
   // The agent keeps the conversation itself and prints it again on resume.
   const resumes = (s) => s.agent === 'claude' || !!s.resume
@@ -201,11 +201,11 @@ export function createTerminals(dir) {
         s.buf = trimTail(s.buf + d, KEEP)
         s.unsaved = true
         s.lastOutput = Date.now()
-        send(s, '', d)
+        send(s, { data: d })
       })
       proc.onExit(({ exitCode }) => {
         s.exit = { code: exitCode }
-        send(s, 'exit', exitCode)
+        send(s, { exit: exitCode })
       })
       return { agent: s.agent, fresh: true }
     },
@@ -232,19 +232,20 @@ export function createTerminals(dir) {
       return { ids, since }
     },
     working,
-    attach(repo, id, res) {
+    /** Calls `fn` with `{ replay }`, what the tab printed so far, then `{ data }` as it prints, then `{ exit }`. */
+    attach(repo, id, fn) {
       const s = sessions.get(key(repo, id))
       if (!s) {
-        res.write('event: exit\ndata: null\n\n')
+        fn({ exit: null })
         return () => {}
       }
-      if (s.buf) res.write(`data: ${JSON.stringify(s.buf)}\n\n`)
+      fn({ replay: s.buf })
       if (s.exit) {
-        res.write(`event: exit\ndata: ${JSON.stringify(s.exit.code)}\n\n`)
+        fn({ exit: s.exit.code })
         return () => {}
       }
-      s.clients.add(res)
-      return () => s.clients.delete(res)
+      s.clients.add(fn)
+      return () => s.clients.delete(fn)
     },
     write(repo, id, data) {
       sessions.get(key(repo, id))?.proc?.write(String(data))

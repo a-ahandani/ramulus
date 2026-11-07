@@ -26,6 +26,7 @@
     "test": "node --test test/*.test.js"
   },
   "dependencies": {
-    "@lydell/node-pty": "^1.1.0"
+    "@lydell/node-pty": "^1.1.0",
+    "ws": "^8.22.1"
   }
 }

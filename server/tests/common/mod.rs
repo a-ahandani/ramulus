@@ -147,37 +147,24 @@ impl Server {
     pub fn stream(&self, path: &str) -> Stream {
         let res = self.get(path);
         assert_eq!(res.status().as_u16(), 200);
-        Stream {
-            res,
-            seen: String::new(),
-            terminal: None,
+        Stream { res, seen: String::new() }
+    }
+
+    /// A terminal tab attached on its own socket, the way the page attaches it.
+    pub fn term(&self, repo: &str, id: &str) -> Term {
+        let (ws, _) = tungstenite::connect(format!("{}/api/term?token={TOKEN}", self.base.replacen("http", "ws", 1))).unwrap();
+        if let tungstenite::stream::MaybeTlsStream::Plain(tcp) = ws.get_ref() {
+            tcp.set_read_timeout(Some(Duration::from_secs(30))).unwrap();
         }
+        let mut term = Term { ws, seen: String::new() };
+        term.send(serde_json::json!({ "op": "attach", "ch": 1, "repo": repo, "id": id }));
+        term
     }
-
-    /// A terminal's output stream that, like a terminal emulator, answers the cursor-position query ConPTY waits for.
-    pub fn term_stream(&self, repo: &str, id: &str) -> Stream {
-        let mut stream = self.stream(&format!("/api/term?token={TOKEN}&repo={}&id={id}", urlencode(repo)));
-        stream.terminal = Some((self.agent.clone(), self.base.clone(), repo.to_string(), id.to_string()));
-        stream
-    }
-}
-
-pub fn urlencode(s: &str) -> String {
-    s.bytes()
-        .map(|b| {
-            if b.is_ascii_alphanumeric() || b"-_.~".contains(&b) {
-                (b as char).to_string()
-            } else {
-                format!("%{b:02X}")
-            }
-        })
-        .collect()
 }
 
 pub struct Stream {
     res: ureq::http::Response<ureq::Body>,
     pub seen: String,
-    terminal: Option<(ureq::Agent, String, String, String)>,
 }
 
 impl Stream {
@@ -190,13 +177,42 @@ impl Stream {
                 Ok(n) => n,
                 Err(e) => panic!("stream failed before {text:?}: {e}; saw {:?}", self.seen),
             };
-            let chunk = String::from_utf8_lossy(&buf[..n]).into_owned();
-            self.seen.push_str(&chunk);
-            if let Some((agent, base, repo, id)) = &self.terminal {
-                for _ in 0..chunk.matches("\\u001b[6n").count() {
-                    let body = serde_json::json!({ "repo": repo, "id": id, "data": "\x1b[1;1R" });
-                    agent.post(&format!("{base}/api/termInput")).header("x-ramulus-token", TOKEN).send_json(&body).unwrap();
-                }
+            self.seen.push_str(&String::from_utf8_lossy(&buf[..n]));
+        }
+    }
+}
+
+pub struct Term {
+    ws: tungstenite::WebSocket<tungstenite::stream::MaybeTlsStream<std::net::TcpStream>>,
+    /// every message the tab sent, as JSON
+    pub seen: String,
+}
+
+impl Term {
+    fn send(&mut self, msg: Value) {
+        self.ws.send(tungstenite::Message::text(msg.to_string())).unwrap();
+    }
+
+    pub fn input(&mut self, data: &str) {
+        self.send(serde_json::json!({ "op": "input", "ch": 1, "data": data }));
+    }
+
+    pub fn resize(&mut self, cols: u16, rows: u16) {
+        self.send(serde_json::json!({ "op": "resize", "ch": 1, "cols": cols, "rows": rows }));
+    }
+
+    /// Reads until the text has been seen, answering the cursor-position query ConPTY waits for, like a terminal emulator.
+    pub fn until(&mut self, text: &str) {
+        while !self.seen.contains(text) {
+            let msg = match self.ws.read() {
+                Ok(m) => m,
+                Err(e) => panic!("socket failed before {text:?}: {e}; saw {:?}", self.seen),
+            };
+            let Ok(t) = msg.to_text() else { continue };
+            let asks = t.matches("\\u001b[6n").count();
+            self.seen.push_str(t);
+            for _ in 0..asks {
+                self.input("\x1b[1;1R");
             }
         }
     }
