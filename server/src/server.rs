@@ -55,7 +55,7 @@ pub struct App {
 }
 
 const SHELL_OPS: [&str; 10] = ["repos", "pins", "setPins", "prefs", "setPrefs", "findRepos", "pickFolder", "ai", "setAi", "openRepo"];
-const REPO_OPS: [&str; 51] = [
+const REPO_OPS: [&str; 52] = [
     "load",
     "init",
     "files",
