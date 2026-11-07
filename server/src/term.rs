@@ -1,18 +1,16 @@
 use crate::ai::{agent, find_bin};
 use crate::wake::Wake;
 use crate::{err, home, var, Env, Error, Result};
-use axum::response::sse::Event;
-use futures_core::Stream;
 use portable_pty::{native_pty_system, Child, ChildKiller, CommandBuilder, MasterPty, PtySize};
 use serde::{Deserialize, Serialize};
+use serde_json::{json, Value};
 use std::collections::{HashMap, HashSet};
-use std::convert::Infallible;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, Weak};
 use std::time::{Duration, Instant};
-use tokio::sync::broadcast;
+use tokio::sync::{broadcast, mpsc};
 
 pub const KEEP: usize = 200_000;
 const MAX_PER_REPO: usize = 8;
@@ -631,7 +629,6 @@ impl Terminals {
         tabs.into_iter().map(|(_, t)| t).collect()
     }
 
-    /// The terminal's output as server-sent events: a replay of what it printed, then live data, then `exit`.
     /// The agent sessions this folder's tabs hold: Claude Code tabs by id, resumed tabs by what they resumed, and for
     /// the other agents, whatever changed since a running new tab of theirs started, since that tab's id is not known.
     pub fn held(&self, repo: &str) -> Held {
@@ -658,42 +655,36 @@ impl Terminals {
         held
     }
 
-    pub fn attach(&self, repo: &str, id: &str) -> impl Stream<Item = std::result::Result<Event, Infallible>> {
-        let session = self.get(repo, id);
-        let data = |d: &str| Event::default().data(serde_json::to_string(d).unwrap_or_default());
-        let exit = |code: Option<u32>| Event::default().event("exit").data(code.map(|c| c.to_string()).unwrap_or_else(|| "null".into()));
-        async_stream::stream! {
-            yield Ok(Event::default().comment("connected"));
-            if let Some(s) = session {
-                let (mut rx, buf, exited) = {
-                    let st = s.state.lock().unwrap();
-                    (s.tx.subscribe(), st.buf.clone(), st.exit)
-                };
-                if !buf.is_empty() {
-                    yield Ok(data(&buf));
-                }
-                match exited {
-                    Some(code) => yield Ok(exit(code)),
-                    None => loop {
-                        match rx.recv().await {
-                            Ok(Msg::Data(d)) => yield Ok(data(&d)),
-                            Ok(Msg::Exit(code)) => {
-                                yield Ok(exit(code));
-                                break;
-                            }
-                            Err(broadcast::error::RecvError::Lagged(_)) => continue,
-                            Err(broadcast::error::RecvError::Closed) => {
-                                yield Ok(exit(None));
-                                break;
-                            }
-                        }
-                    },
-                }
-            } else {
-                yield Ok(exit(None));
+    /// Sends the tab's output on `out` as `{"ch","replay"}` with what it printed so far, then `{"ch","data"}` as it prints,
+    /// then `{"ch","exit"}`. A reader that fell behind gets the replay again instead of a gap.
+    pub async fn forward(&self, repo: &str, id: &str, ch: u64, out: mpsc::Sender<String>) {
+        let send = |v: Value| out.send(v.to_string());
+        let Some(s) = self.get(repo, id) else {
+            let _ = send(json!({ "ch": ch, "exit": null })).await;
+            return;
+        };
+        'replay: loop {
+            let (mut rx, buf, mut exit) = {
+                let st = s.state.lock().unwrap();
+                (s.tx.subscribe(), st.buf.clone(), st.exit)
+            };
+            if send(json!({ "ch": ch, "replay": buf })).await.is_err() {
+                return;
             }
-            // like the browser, the client closes on exit; until then the connection stays open
-            std::future::pending::<()>().await;
+            while exit.is_none() {
+                match rx.recv().await {
+                    Ok(Msg::Data(d)) => {
+                        if send(json!({ "ch": ch, "data": d })).await.is_err() {
+                            return;
+                        }
+                    }
+                    Ok(Msg::Exit(code)) => exit = Some(code),
+                    Err(broadcast::error::RecvError::Lagged(_)) => continue 'replay,
+                    Err(broadcast::error::RecvError::Closed) => exit = Some(None),
+                }
+            }
+            let _ = send(json!({ "ch": ch, "exit": exit.flatten() })).await;
+            return;
         }
     }
 
@@ -765,5 +756,33 @@ impl Terminals {
                 let _ = killer.kill();
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn a_reader_that_falls_behind_gets_the_replay_again() {
+        let terms = Terminals::new(None);
+        let s = Arc::new(Session::new(0, "shell", None, "u".into(), "before".into(), None, None));
+        terms.sessions.lock().unwrap().insert(key("/r", "t"), s.clone());
+        let (tx, mut rx) = mpsc::channel(1);
+        let t = Arc::new(terms);
+        let forwarding = tokio::spawn({
+            let t = t.clone();
+            async move { t.forward("/r", "t", 7, tx).await }
+        });
+        assert_eq!(rx.recv().await.unwrap(), r#"{"ch":7,"replay":"before"}"#);
+        // more output than the channel keeps arrives while nothing reads
+        for _ in 0..2000 {
+            let _ = s.tx.send(Msg::Data("x".into()));
+        }
+        s.state.lock().unwrap().buf = "after".into();
+        assert_eq!(rx.recv().await.unwrap(), r#"{"ch":7,"replay":"after"}"#);
+        let _ = s.tx.send(Msg::Exit(Some(3)));
+        assert_eq!(rx.recv().await.unwrap(), r#"{"ch":7,"exit":3}"#);
+        forwarding.await.unwrap();
     }
 }

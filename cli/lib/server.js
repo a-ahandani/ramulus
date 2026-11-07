@@ -8,8 +8,11 @@ import * as git from './git.js'
 import { changePullRequest, ciRuns, mergePullRequest, prConversation, pullRequest, pullRequests } from './prs.js'
 import { agentSessions } from './sessions.js'
 import { createTerminals } from './term.js'
+import { WebSocketServer } from 'ws'
 
 const TYPES = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript', '.css': 'text/css', '.svg': 'image/svg+xml', '.png': 'image/png', '.json': 'application/json' }
+
+const LOCAL_HOST = /^(127\.0\.0\.1|localhost|\[::1\])(:\d+)?$/
 
 const termId = (id) => {
   if (id === undefined || id === null) return 'main'
@@ -137,8 +140,6 @@ export function createServer({ dir, root = dir, uiDir, token, stateFile = STATE 
     },
     termList: (repo) => terms.list(repo),
     agentSessions: (repo) => agentSessions(repo, terms.held(repo)),
-    termInput: (repo, b) => terms.write(repo, termId(b.id), b.data),
-    termResize: (repo, b) => terms.resize(repo, termId(b.id), b.cols, b.rows),
     termStop: (repo, b) => terms.stop(repo, b.all ? undefined : termId(b.id)),
     aiAsk: async (repo, b, res) => {
       await needAi()
@@ -189,7 +190,7 @@ export function createServer({ dir, root = dir, uiDir, token, stateFile = STATE 
 
   const server = http.createServer(async (req, res) => {
     const host = req.headers.host ?? ''
-    if (!/^(127\.0\.0\.1|localhost|\[::1\])(:\d+)?$/.test(host)) {
+    if (!LOCAL_HOST.test(host)) {
       res.writeHead(403).end('forbidden host')
       return
     }
@@ -214,16 +215,9 @@ export function createServer({ dir, root = dir, uiDir, token, stateFile = STATE 
       })
       return
     }
+    // the terminal socket only answers an upgrade, as the Rust helper says
     if (url.pathname === '/api/term') {
-      const repo = url.searchParams.get('repo') || dir
-      const id = url.searchParams.get('id') ?? 'main'
-      if (url.searchParams.get('token') !== token || !known.has(repo) || !/^[a-z0-9-]{1,40}$/.test(id)) {
-        res.writeHead(401).end()
-        return
-      }
-      res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-store', connection: 'keep-alive' })
-      res.write(': connected\n\n')
-      req.on('close', terms.attach(repo, id, res))
+      res.writeHead(400, { 'content-type': 'text/plain; charset=utf-8' }).end("Connection header did not include 'upgrade'")
       return
     }
     if (url.pathname.startsWith('/api/')) {
@@ -256,6 +250,47 @@ export function createServer({ dir, root = dir, uiDir, token, stateFile = STATE 
     }
     res.writeHead(200, { 'content-type': TYPES[extname(file)] ?? 'application/octet-stream', 'cache-control': 'no-cache' })
     createReadStream(file).pipe(res)
+  })
+  // One socket carries every terminal tab the page shows, each on a channel number the page picks: `attach` starts the
+  // tab's output, `input` and `resize` go to it, `detach` ends it. Keystrokes stop waiting behind other requests.
+  const sockets = new WebSocketServer({ noServer: true })
+  server.on('upgrade', (req, socket, head) => {
+    const url = new URL(req.url, 'http://localhost')
+    if (!LOCAL_HOST.test(req.headers.host ?? '')) return socket.end('HTTP/1.1 403 Forbidden\r\n\r\n')
+    if (url.pathname !== '/api/term' || url.searchParams.get('token') !== token) return socket.end('HTTP/1.1 401 Unauthorized\r\n\r\n')
+    sockets.handleUpgrade(req, socket, head, (ws) => {
+      const chans = new Map()
+      const detach = (ch) => {
+        chans.get(ch)?.detach()
+        chans.delete(ch)
+      }
+      ws.on('message', (raw) => {
+        let m
+        try {
+          m = JSON.parse(raw)
+        } catch {
+          return
+        }
+        const ch = m?.ch
+        if (!Number.isSafeInteger(ch) || ch < 0) return
+        const c = chans.get(ch)
+        if (m.op === 'attach') {
+          detach(ch)
+          const repo = m.repo ?? dir
+          let id
+          try {
+            id = termId(m.id)
+          } catch {}
+          if (!id || !known.has(repo)) return ws.send(JSON.stringify({ ch, exit: null }))
+          const entry = { repo, id, detach: () => {} }
+          chans.set(ch, entry)
+          entry.detach = terms.attach(repo, id, (out) => ws.send(JSON.stringify({ ch, ...out })))
+        } else if (m.op === 'input' && c) terms.write(c.repo, c.id, m.data ?? '')
+        else if (m.op === 'resize' && c) terms.resize(c.repo, c.id, m.cols, m.rows)
+        else if (m.op === 'detach') detach(ch)
+      })
+      ws.on('close', () => [...chans.keys()].forEach(detach))
+    })
   })
   server.stopAgents = () => {
     terms.stopAll()

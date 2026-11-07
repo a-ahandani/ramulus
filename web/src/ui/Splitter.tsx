@@ -1,4 +1,4 @@
-export function Splitter({ onDrag, horizontal }: { onDrag: (delta: number) => void; horizontal?: boolean }) {
+export function Splitter({ onDrag, onEnd, horizontal }: { onDrag: (delta: number) => void; onEnd?: () => void; horizontal?: boolean }) {
   return (
     <div
       class={`splitter ${horizontal ? 'horizontal' : ''}`}
@@ -14,6 +14,7 @@ export function Splitter({ onDrag, horizontal }: { onDrag: (delta: number) => vo
           window.removeEventListener('pointermove', move)
           window.removeEventListener('pointerup', up)
           document.body.style.cursor = ''
+          onEnd?.()
         }
         document.body.style.cursor = horizontal ? 'row-resize' : 'col-resize'
         window.addEventListener('pointermove', move)

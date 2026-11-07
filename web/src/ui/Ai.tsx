@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'preact/hooks'
 import { DEFAULT_PROMPTS } from '../git/ai'
-import type { AiInfo, AiSettings, AiTask, Backend, TermKind } from '../git/backend'
+import type { AiInfo, AiSettings, AiTask, Backend, TermKind, TermLink } from '../git/backend'
 import { COLORS } from '../git/scheme'
 import { Icon } from './bits'
 import { Buttons, Frame } from './Dialogs'
@@ -104,6 +104,8 @@ export function AgentTerminal(p: {
   agent?: string
   resume?: string
   look: string
+  /** whether this tab is the one showing; the others stay alive behind it, so switching to one is instant */
+  shown: boolean
   focus: boolean
   paste?: { id: number; text: string }
   restart: number
@@ -131,32 +133,31 @@ export function AgentTerminal(p: {
       const fit = new FitAddon()
       xt.loadAddon(fit)
       xt.open(el)
-      // the GPU renderer; when its context is lost, xterm's DOM renderer takes over
-      try {
-        const gl = new WebglAddon()
-        gl.onContextLoss(() => gl.dispose())
-        xt.loadAddon(gl)
-      } catch {}
-      fit.fit()
-      let pending = ''
-      let sending = false
-      let session: Promise<unknown> = Promise.resolve()
-      const flush = async () => {
-        if (sending) return
-        sending = true
-        // The helper drops input for a session it has not started yet, and the keyboard arrives first.
-        await session.catch(() => {})
-        while (pending) {
-          const data = pending
-          pending = ''
-          await latest.current.be.termInput!(latest.current.id, data).catch(() => {})
+      // The GPU renderer, made again whenever the tab shows without one: past the browser's limit on contexts, the
+      // oldest tab loses its own and xterm's DOM renderer takes over until then.
+      let gl: { dispose(): void } | undefined
+      // without WebGL2 it fails at once, and every try stays in xterm's add-on list, so it is tried once
+      let noGpu = false
+      const gpu = () => {
+        if (gl || noGpu) return
+        try {
+          const a = new WebglAddon()
+          xt.loadAddon(a)
+          a.onContextLoss(() => {
+            a.dispose()
+            if (gl === a) gl = undefined
+          })
+          gl = a
+        } catch {
+          noGpu = true
         }
-        sending = false
       }
-      const send = (d: string) => {
-        pending += d
-        flush()
-      }
+      gpu()
+      fit.fit()
+      let link: TermLink | undefined
+      // the helper drops typing for a tab it has not started yet, and the keyboard arrives first
+      let pending = ''
+      const send = (d: string) => (link ? link.input(d) : (pending += d))
       xt.onData(send)
       // a backslash before Return is Claude Code's newline in every terminal, so Shift+Enter and Option+Enter send that
       xt.attachCustomKeyEventHandler((e) => {
@@ -179,17 +180,34 @@ export function AgentTerminal(p: {
         true,
       )
       let lastOutput = 0
-      let detach = () => {}
+      // The size the program was last given. While a splitter drags, the screen follows every frame but the program
+      // hears once the size settles, so it redraws once instead of on every frame.
+      let told = ''
+      let telling: ReturnType<typeof setTimeout> | undefined
+      const tell = () => {
+        clearTimeout(telling)
+        telling = setTimeout(() => {
+          const size = `${xt.cols}x${xt.rows}`
+          if (link && size !== told) {
+            told = size
+            link.resize(xt.cols, xt.rows)
+          }
+        }, 120)
+      }
       const start = async () => {
-        detach()
+        link?.close()
+        link = undefined
         try {
-          const r = await (session = latest.current.be.termStart!(latest.current.id, latest.current.kind, latest.current.agent, xt.cols, xt.rows, latest.current.resume))
+          told = `${xt.cols}x${xt.rows}`
+          const r = await latest.current.be.termStart!(latest.current.id, latest.current.kind, latest.current.agent, xt.cols, xt.rows, latest.current.resume)
           latest.current.onState({ running: true, agent: r.agent })
           lastOutput = Date.now()
-          detach = latest.current.be.termStream!(
+          link = latest.current.be.termAttach!(
             latest.current.id,
-            (d) => {
+            (d, replay) => {
               lastOutput = Date.now()
+              // a replay is the whole screen again, after the socket came back or the tab fell behind
+              if (replay) xt.reset()
               xt.write(d)
             },
             () => {
@@ -197,6 +215,9 @@ export function AgentTerminal(p: {
               xt.write(`\r\n\x1b[2m[The ${latest.current.kind === 'shell' ? 'terminal' : 'agent'} exited. Press Restart to start it again.]\x1b[0m\r\n`)
             },
           )
+          if (pending) link.input(pending)
+          pending = ''
+          tell()
           if (r.fresh) {
             const begun = Date.now()
             while (Date.now() - lastOutput < 1200 && Date.now() - begun < 15000) await new Promise((res) => setTimeout(res, 200))
@@ -209,9 +230,14 @@ export function AgentTerminal(p: {
       }
       ready.current = start().catch(() => {})
       const ro = new ResizeObserver(() => {
-        const before = `${xt.cols}x${xt.rows}`
+        // a hidden tab has no size and lets go of the keyboard, so nothing is typed into it unseen; it fits again as it shows
+        if (!el.clientWidth) {
+          if (el.contains(document.activeElement)) (document.activeElement as HTMLElement).blur()
+          return
+        }
+        gpu()
         fit.fit()
-        if (`${xt.cols}x${xt.rows}` !== before) latest.current.be.termResize!(latest.current.id, xt.cols, xt.rows).catch(() => {})
+        tell()
       })
       ro.observe(el)
       term.current = {
@@ -219,8 +245,8 @@ export function AgentTerminal(p: {
         focus: () => xt.focus(),
         setTheme: () => (xt.options.theme = theme()),
         restart: () => {
-          detach()
-          detach = () => {}
+          link?.close()
+          link = undefined
           ready.current = latest.current
             .be.termStop!(latest.current.id)
             .catch(() => {})
@@ -234,7 +260,8 @@ export function AgentTerminal(p: {
       }
       cleanup = () => {
         ro.disconnect()
-        detach()
+        clearTimeout(telling)
+        link?.close()
         xt.dispose()
       }
     })
@@ -276,5 +303,5 @@ export function AgentTerminal(p: {
     }
   }, [p.paste?.id])
 
-  return <div class="agent-term" ref={host} />
+  return <div class="agent-term" hidden={!p.shown} ref={host} />
 }

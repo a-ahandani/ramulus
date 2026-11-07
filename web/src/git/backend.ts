@@ -194,8 +194,13 @@ export interface Backend {
   termStart?(id: string, kind: TermKind, agent: string | undefined, cols: number, rows: number, resume?: string): Promise<{ agent?: string; fresh: boolean }>
   agentSessions?(): Promise<AgentSession[]>
   termList?(): Promise<TermTab[]>
-  termInput?(id: string, data: string): Promise<void>
-  termResize?(id: string, cols: number, rows: number): Promise<void>
   termStop?(id?: string): Promise<void>
-  termStream?(id: string, onData: (data: string) => void, onExit: () => void): () => void
+  /** Connects to a tab: what it printed so far arrives with `replay` set, then its output as it prints, then `onExit`. */
+  termAttach?(id: string, onData: (data: string, replay: boolean) => void, onExit: () => void): TermLink
+}
+
+export interface TermLink {
+  input(data: string): void
+  resize(cols: number, rows: number): void
+  close(): void
 }

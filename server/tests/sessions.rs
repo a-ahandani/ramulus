@@ -152,7 +152,7 @@ fn lists_and_resumes_the_conversations_held_in_a_folder() {
         ("c", "opencode", "ses_abc", "args:--session ses_abc".into()),
     ] {
         srv.result("termStart", json!({ "id": id, "agent": agent, "resume": resume, "cols": 80, "rows": 24 }));
-        srv.term_stream(r, id).until(&args);
+        srv.term(r, id).until(&args);
     }
     let ids = |v: Value| v.as_array().unwrap().iter().map(|s| s["id"].as_str().unwrap().to_string()).collect::<Vec<_>>();
     assert_eq!(ids(srv.result("agentSessions", json!({}))), [C1, X2]);

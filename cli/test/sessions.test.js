@@ -106,7 +106,7 @@ describe('agent sessions', { skip: process.platform === 'win32' }, () => {
     const terms = createTerminals()
     const seen = (id) => {
       let out = ''
-      terms.attach(repo, id, { write: (d) => (out += d) })
+      terms.attach(repo, id, (msg) => (out += JSON.stringify(msg)))
       return async (text) => {
         for (let i = 0; i < 100 && !out.includes(text); i++) await new Promise((r) => setTimeout(r, 50))
         assert.ok(out.includes(text), `never saw ${text}; saw ${out}`)

@@ -12,13 +12,10 @@ after(() => rmSync(root, { recursive: true, force: true }))
 const watch = (terms, id) => {
   let seen = ''
   const waiters = []
-  const res = {
-    write: (chunk) => {
-      seen += chunk
-      for (const w of waiters) w()
-    },
-  }
-  terms.attach(root, id, res)
+  terms.attach(root, id, (msg) => {
+    seen += JSON.stringify(msg)
+    for (const w of waiters) w()
+  })
   return (text) =>
     new Promise((done, fail) => {
       const t = setTimeout(() => fail(new Error(`never saw ${text}; saw ${seen}`)), 10000)

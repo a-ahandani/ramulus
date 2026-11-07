@@ -17,7 +17,7 @@ function helper(): Plugin {
       api = createServer({ dir, uiDir: resolve('../cli/ui'), token })
       await new Promise<void>((done) => api.listen(0, '127.0.0.1', done))
       console.log(`Serving ${dir}`)
-      return { server: { open: `/#${token}`, proxy: { '/api': `http://127.0.0.1:${(api.address() as AddressInfo).port}` } } }
+      return { server: { open: `/#${token}`, proxy: { '/api': { target: `http://127.0.0.1:${(api.address() as AddressInfo).port}`, ws: true } } } }
     },
     configureServer(server) {
       server.httpServer?.once('close', () => api.close())
