@@ -6,7 +6,7 @@ import { PAGE, type Commit, type DiffArea, type FileChange, type NetSettings, ty
 import type { Scheme } from '../git/scheme'
 import { AiConsent, AiSettingsDialog } from './Ai'
 import { useAgentPanel } from './AgentPanel'
-import { BrandMark, CI_WORD, Icon, RepoMark, cannotFastForward, ciByCommit, ciState, clamp, laneColor, mergedBranches, prsByBranch, short, stored, webUrl, wipTally } from './bits'
+import { BrandMark, CI_WORD, Icon, RepoMark, SHOW_IN_FILES, SHOW_REPO_IN_FILES, cannotFastForward, ciByCommit, ciState, clamp, laneColor, mergedBranches, prsByBranch, short, stored, webUrl, wipTally } from './bits'
 import { DetailPanel, type FileSel } from './DetailPanel'
 import { PrCard } from './PrView'
 import { DiffWindow, tabKey, type DiffOptions, type DiffTab } from './DiffWindow'
@@ -749,12 +749,21 @@ export function App(p: { be: Backend; name: string; active: boolean; theme: Them
     setMenu({ x: e.clientX, y: e.clientY, items })
   }
 
+  const repoMenu = (e: MouseEvent) => {
+    const v = view!
+    if (!v.be.revealPath) return
+    e.preventDefault()
+    const show = () => v.be.revealPath!('').catch((err) => fail('Could not show the repository', err))
+    setMenu({ x: e.clientX, y: e.clientY, items: [{ label: SHOW_REPO_IN_FILES, onClick: show }] })
+  }
+
   const fileMenu = (e: MouseEvent, f: FileChange, area: DiffArea) => {
     const v = view!
     const items: MenuItem[] = []
     if (area.kind === 'unstaged') items.push({ label: 'Stage', onClick: () => run('Staging', () => v.be.stage([f]), { statusOnly: true }) })
     if (area.kind === 'staged') items.push({ label: 'Unstage', onClick: () => run('Unstaging', () => v.be.unstage([f.path]), { statusOnly: true }) })
     if (v.be.openPath && f.kind !== 'D') items.push({ label: 'Open file', onClick: () => v.be.openPath!(f.path).catch((err) => fail('Could not open the file', err)) })
+    if (v.be.revealPath && f.kind !== 'D') items.push({ label: SHOW_IN_FILES, onClick: () => v.be.revealPath!(f.path).catch((err) => fail('Could not show the file', err)) })
     items.push({ label: 'Copy path', onClick: () => copy(f.path) })
     if (area.kind === 'unstaged') {
       items.push({ sep: true })
@@ -915,6 +924,7 @@ export function App(p: { be: Backend; name: string; active: boolean; theme: Them
       { id: 'pullall', group: 'Action', label: 'Pull every open repository (fast-forward only)', run: () => p.onAll('pull') },
       { id: 'fetchall', group: 'Action', label: 'Fetch every open repository', run: () => p.onAll('fetch') },
     ]
+    if (v.be.revealPath) list.push({ id: 'reveal', group: 'View', label: SHOW_REPO_IN_FILES, run: () => void v.be.revealPath!('').catch((err) => fail('Could not show the repository', err)) })
     list.push(...aiCommands())
     if (solo.size) list.push({ id: 'unsolo', group: 'View', label: 'Show all branches', run: () => setSolo(new Set()) })
     const merged = mergedBranches(v.data.local, prs)
@@ -1196,7 +1206,9 @@ export function App(p: { be: Backend; name: string; active: boolean; theme: Them
       <div class="toolbar">
         <div class="tb-side">
           <RepoMark url={v.data.originUrl} />
-          <span class="repo">{v.data.name}</span>
+          <span class="repo" onContextMenu={repoMenu}>
+            {v.data.name}
+          </span>
           <button
             class={`branch ${v.data.headBranch ? '' : 'detached'}`}
             disabled={v.data.local.length === 0}
@@ -1371,6 +1383,7 @@ export function App(p: { be: Backend; name: string; active: boolean; theme: Them
             onDirty={setTabDirty}
             onSave={saveFile}
             onOpen={v.be.openPath ? (f) => v.be.openPath!(f.path).catch((err) => fail('Could not open the file', err)) : undefined}
+            onReveal={v.be.revealPath ? (f) => v.be.revealPath!(f.path).catch((err) => fail('Could not show the file', err)) : undefined}
             onMergePr={v.be.prMerge ? mergePr : undefined}
             onChangePr={v.be.prChange ? changePr : undefined}
             status={v.data.status}

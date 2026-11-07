@@ -184,6 +184,8 @@ export interface Backend {
   abort?(): Promise<void>
   continueOp?(): Promise<void>
   openPath?(path: string): Promise<void>
+  /** Shows the path in the desktop's file manager; an empty path means the repository itself. */
+  revealPath?(path: string): Promise<void>
   subscribe?(onChange: () => void): () => void
   ai?(): Promise<AiInfo>
   setAi?(settings: AiSettings): Promise<void>

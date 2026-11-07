@@ -55,7 +55,7 @@ pub struct App {
 }
 
 const SHELL_OPS: [&str; 10] = ["repos", "pins", "setPins", "prefs", "setPrefs", "findRepos", "pickFolder", "ai", "setAi", "openRepo"];
-const REPO_OPS: [&str; 51] = [
+const REPO_OPS: [&str; 52] = [
     "load",
     "init",
     "files",
@@ -71,6 +71,7 @@ const REPO_OPS: [&str; 51] = [
     "writeIndex",
     "writeWorkdir",
     "openPath",
+    "revealPath",
     "stage",
     "unstage",
     "discard",
@@ -413,6 +414,7 @@ impl App {
                 .await
                 .and_then(|_| done()),
             "openPath" => git::open_path(repo, &b.string("path")).and_then(|_| done()),
+            "revealPath" => git::reveal_path(repo, &b.string("path")).await.and_then(|_| done()),
             "stage" => git::stage(repo, &b.paths("paths")?).await.and_then(|_| done()),
             "unstage" => git::unstage(repo, &b.paths("paths")?).await.and_then(|_| done()),
             "discard" => {

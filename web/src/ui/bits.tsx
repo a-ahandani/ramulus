@@ -25,6 +25,13 @@ export function wipTally(s: WorkStatus) {
   return tally
 }
 
+const PLATFORM = typeof navigator === 'undefined' ? '' : navigator.platform
+const FILES_APP = /Mac/.test(PLATFORM) ? 'Finder' : /Win/.test(PLATFORM) ? 'File Explorer' : 'the file manager'
+/** Menu label for showing one file where the desktop keeps it. */
+export const SHOW_IN_FILES = `Show in ${FILES_APP}`
+/** The same, for the repository's own folder. */
+export const SHOW_REPO_IN_FILES = `Show the repository in ${FILES_APP}`
+
 export function Icon({ name }: { name: string }) {
   return <i class={`codicon codicon-${name}`} aria-hidden="true" />
 }

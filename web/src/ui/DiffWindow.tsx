@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'preact/hooks'
 import type { Backend, FileVersions, PrChange, PullRequest } from '../git/backend'
 import { mixedEol } from '../git/chunk'
 import type { FileChange, WorkStatus } from '../git/repo'
-import { Icon, PR_ICON, short } from './bits'
+import { Icon, PR_ICON, SHOW_IN_FILES, short } from './bits'
 import { PrView } from './PrView'
 import { ReviewPane } from './Review'
 import type { FileSel } from './DetailPanel'
@@ -136,6 +136,7 @@ export function DiffWindow(p: {
   onDirty: (key: string, dirty: boolean) => void
   onSave: (sel: FileSel, text: string, base: string, done: () => void) => void
   onOpen?: (sel: FileSel) => void
+  onReveal?: (sel: FileSel) => void
   onMergePr?: (pr: PullRequest) => void
   onChangePr?: (pr: PullRequest, action: PrChange) => void
   status: WorkStatus
@@ -231,6 +232,11 @@ export function DiffWindow(p: {
           {p.onOpen && current.sel.area.kind !== 'commit' && !current.pr && !current.review && (
             <button class="icon" title="Open File" onClick={() => p.onOpen!(current.sel)}>
               <Icon name="go-to-file" />
+            </button>
+          )}
+          {p.onReveal && current.sel.area.kind !== 'commit' && !current.pr && !current.review && (
+            <button class="icon" title={SHOW_IN_FILES} onClick={() => p.onReveal!(current.sel)}>
+              <Icon name="folder-opened" />
             </button>
           )}
           {!current.file && !current.pr && !current.review && (
