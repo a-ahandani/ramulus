@@ -346,8 +346,8 @@ select {
 
 .brand-mark {
   flex: none;
-  width: 22px;
-  height: 18px;
+  width: 14px;
+  height: 19px;
   background: currentColor;
   mask: url('./mark.svg') center / contain no-repeat;
 }
@@ -1548,7 +1548,7 @@ svg.codicon {
 }
 
 .welcome h1 .brand-mark {
-  width: 44px;
+  width: 27px;
   height: 36px;
 }
 

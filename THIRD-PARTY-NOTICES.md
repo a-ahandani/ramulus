@@ -13,3 +13,5 @@ The browser UI, served by the npm helper and the hosted page, bundles the compon
 - Lobe Icons (the AI agents' logos): MIT License, LobeHub
 
 The website bundles the Lexend and Libre Clarendon fonts under the SIL Open Font License 1.1; their license files are in `site/fonts`.
+
+The Ramulus mark — the stick insect in the logo, the favicons and the app icons — is from the Basic Straight Filled pack on Flaticon: icons made by Magnific from www.flaticon.com. The Flaticon Free License requires this attribution.
