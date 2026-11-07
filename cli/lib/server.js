@@ -215,6 +215,11 @@ export function createServer({ dir, root = dir, uiDir, token, stateFile = STATE 
       })
       return
     }
+    // the terminal socket only answers an upgrade, as the Rust helper says
+    if (url.pathname === '/api/term') {
+      res.writeHead(400, { 'content-type': 'text/plain; charset=utf-8' }).end("Connection header did not include 'upgrade'")
+      return
+    }
     if (url.pathname.startsWith('/api/')) {
       if (req.headers['x-ramulus-token'] !== token) {
         sendJson(res, 401, { error: 'bad token' })

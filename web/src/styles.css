@@ -2459,8 +2459,7 @@ button.sb-empty.open {
   background: var(--bg);
 }
 
-.agent-drawer[hidden],
-.agent-term[hidden] {
+.agent-drawer[hidden] {
   display: none;
 }
 

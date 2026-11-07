@@ -212,6 +212,9 @@ fn refuses_a_terminal_socket_without_the_token_or_for_a_folder_not_opened() {
     let (root, _repo, srv) = ai_server();
     let bad = tungstenite::connect(format!("{}/api/term?token=nope", srv.base.replacen("http", "ws", 1)));
     assert!(matches!(bad, Err(tungstenite::Error::Http(r)) if r.status() == 401));
+    let mut plain = srv.get(&format!("/api/term?token={TOKEN}"));
+    assert_eq!(plain.status().as_u16(), 400);
+    assert_eq!(plain.body_mut().read_to_string().unwrap(), "Connection header did not include 'upgrade'");
     srv.term(s(&root.join("other")), "main").until(r#"{"ch":1,"exit":null}"#);
 }
 

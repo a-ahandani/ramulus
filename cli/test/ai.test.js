@@ -186,6 +186,9 @@ describe('AI through the helper', () => {
 
   it('refuses a terminal socket without the token or for a folder not opened', async () => {
     await assert.rejects(attach('main', repo, 'nope'), /401/)
+    const plain = await fetch(`${base}/api/term?token=${'t'.repeat(32)}`)
+    assert.equal(plain.status, 400)
+    assert.equal(await plain.text(), "Connection header did not include 'upgrade'")
     await (await attach('main', join(root, 'other'))).until('{"ch":1,"exit":null}')
   })
 

@@ -136,8 +136,10 @@ export function AgentTerminal(p: {
       // The GPU renderer, made again whenever the tab shows without one: past the browser's limit on contexts, the
       // oldest tab loses its own and xterm's DOM renderer takes over until then.
       let gl: { dispose(): void } | undefined
+      // without WebGL2 it fails at once, and every try stays in xterm's add-on list, so it is tried once
+      let noGpu = false
       const gpu = () => {
-        if (gl) return
+        if (gl || noGpu) return
         try {
           const a = new WebglAddon()
           xt.loadAddon(a)
@@ -146,7 +148,9 @@ export function AgentTerminal(p: {
             if (gl === a) gl = undefined
           })
           gl = a
-        } catch {}
+        } catch {
+          noGpu = true
+        }
       }
       gpu()
       fit.fit()
