@@ -206,6 +206,8 @@ impl Term {
         while !self.seen.contains(text) {
             let msg = match self.ws.read() {
                 Ok(m) => m,
+                // a signal from the helper's child processes can interrupt the read, which then carries on
+                Err(tungstenite::Error::Io(e)) if e.kind() == std::io::ErrorKind::Interrupted => continue,
                 Err(e) => panic!("socket failed before {text:?}: {e}; saw {:?}", self.seen),
             };
             let Ok(t) = msg.to_text() else { continue };
