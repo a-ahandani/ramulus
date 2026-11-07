@@ -793,11 +793,16 @@ pub fn open_external(target: &OsStr) -> Result<()> {
         c.arg(target);
         c
     };
+    detach(&mut cmd);
+    Ok(())
+}
+
+/// Spawns a launcher and lets it go; nothing here waits for the window it opens.
+fn detach(cmd: &mut Command) {
     cmd.stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null());
     #[cfg(windows)]
     cmd.creation_flags(crate::NO_WINDOW);
     let _ = cmd.spawn();
-    Ok(())
 }
 
 pub fn open_path(dir: &str, path: &str) -> Result<()> {
@@ -807,6 +812,80 @@ pub fn open_path(dir: &str, path: &str) -> Result<()> {
         return err("That file no longer exists");
     }
     open_external(full.as_os_str())
+}
+
+/// Shows a path in the desktop's file manager: a folder opens, a file is selected inside its own.
+#[cfg(target_os = "macos")]
+async fn show_in_manager(target: &Path) -> Result<()> {
+    let mut cmd = Command::new("open");
+    if target.is_dir() {
+        cmd.arg(target);
+    } else {
+        cmd.arg("-R").arg(target);
+    }
+    detach(&mut cmd);
+    Ok(())
+}
+
+/// Shows a path in the desktop's file manager: a folder opens, a file is selected inside its own.
+#[cfg(windows)]
+async fn show_in_manager(target: &Path) -> Result<()> {
+    use std::os::windows::process::CommandExt as _;
+    // Explorer parses its own command line and wants the path quoted on its own. The quoting Rust
+    // would apply wraps the whole /select, token instead, which Explorer does not understand.
+    let arg = if target.is_dir() {
+        format!("\"{}\"", target.display())
+    } else {
+        format!("/select,\"{}\"", target.display())
+    };
+    let mut cmd = Command::new("explorer");
+    cmd.as_std_mut().raw_arg(arg);
+    detach(&mut cmd);
+    Ok(())
+}
+
+/// Shows a path in the desktop's file manager: a folder opens, a file is selected inside its own.
+#[cfg(not(any(windows, target_os = "macos")))]
+async fn show_in_manager(target: &Path) -> Result<()> {
+    // The freedesktop interface selects the file itself; a desktop without it gets the folder.
+    if !target.is_dir() {
+        let items = format!("array:string:file://{}", target.display());
+        let mut probe = Command::new("dbus-send");
+        probe
+            .args([
+                "--session",
+                "--dest=org.freedesktop.FileManager1",
+                "--type=method_call",
+                "/org/freedesktop/FileManager1",
+                "org.freedesktop.FileManager1.ShowItems",
+                items.as_str(),
+                "string:",
+            ])
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null());
+        if probe.status().await.is_ok_and(|s| s.success()) {
+            return Ok(());
+        }
+    }
+    let mut cmd = Command::new("xdg-open");
+    cmd.arg(if target.is_dir() { target } else { target.parent().unwrap_or(target) });
+    detach(&mut cmd);
+    Ok(())
+}
+
+/// Shows a file in the file manager, or the repository's own folder when the path is empty.
+pub async fn reveal_path(dir: &str, path: &str) -> Result<()> {
+    let full = if path.is_empty() {
+        crate::resolve(Path::new(dir), Path::new(""))
+    } else {
+        safe_path(path)?;
+        inside_repo(dir, path)?
+    };
+    if !full.exists() {
+        return err("That path no longer exists");
+    }
+    show_in_manager(&full).await
 }
 
 pub async fn stage(dir: &str, paths: &[String]) -> Result<()> {

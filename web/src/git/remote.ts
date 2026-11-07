@@ -52,6 +52,7 @@ export function httpBackend(base: string, token: string, repo?: string): Backend
     writeIndex: (path, content, expected) => call('writeIndex', { path, content, expected }),
     writeWorkdir: (path, content, expected) => call('writeWorkdir', { path, content, expected }),
     openPath: (path) => call('openPath', { path }),
+    revealPath: (path) => call('revealPath', { path }),
     stage: (files) => call('stage', { paths: files.map((f) => f.path) }),
     unstage: (paths) => call('unstage', { paths }),
     discard: (files) => call('discard', { files }),

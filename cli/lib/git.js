@@ -1,7 +1,7 @@
 import { execFile, spawn } from 'node:child_process'
 import { existsSync, statSync } from 'node:fs'
 import { lstat, readdir, readFile, writeFile } from 'node:fs/promises'
-import { join, resolve, sep } from 'node:path'
+import { dirname, join, resolve, sep } from 'node:path'
 
 const NUL = '\0'
 const RS = '\x1e'
@@ -362,13 +362,38 @@ export function pickFolder() {
   )
 }
 
+function detach(cmd, args, opts) {
+  spawn(cmd, args, { stdio: 'ignore', detached: true, ...opts })
+    .on('error', () => {})
+    .unref()
+}
+
 export function openPath(dir, path) {
   safePaths([path])
   const full = insideRepo(dir, path)
   if (!existsSync(full)) throw new Error('That file no longer exists')
   const cmd = process.platform === 'darwin' ? 'open' : process.platform === 'win32' ? 'cmd' : 'xdg-open'
   const args = process.platform === 'win32' ? ['/c', 'start', '', full] : [full]
-  spawn(cmd, args, { stdio: 'ignore', detached: true }).on('error', () => {}).unref()
+  detach(cmd, args)
+}
+
+// the freedesktop interface selects the file itself; a desktop without it gets the folder instead
+function shownOverDbus(full) {
+  const args = ['--session', '--dest=org.freedesktop.FileManager1', '--type=method_call', '/org/freedesktop/FileManager1', 'org.freedesktop.FileManager1.ShowItems', 'array:string:file://' + full, 'string:']
+  return new Promise((ok) => execFile('dbus-send', args, (err) => ok(!err)))
+}
+
+/** Shows a file in the file manager, or the repository's own folder when the path is empty. */
+export async function revealPath(dir, path) {
+  if (path) safePaths([path])
+  const full = path ? insideRepo(dir, path) : resolve(dir)
+  if (!existsSync(full)) throw new Error('That path no longer exists')
+  const folder = statSync(full).isDirectory()
+  if (process.platform === 'darwin') return detach('open', folder ? [full] : ['-R', full])
+  // Explorer parses its own command line, so the path is quoted here and passed through untouched
+  if (process.platform === 'win32') return detach('explorer', [folder ? '"' + full + '"' : '/select,"' + full + '"'], { windowsVerbatimArguments: true })
+  if (!folder && (await shownOverDbus(full))) return
+  detach('xdg-open', [folder ? full : dirname(full)])
 }
 
 export async function stage(dir, paths) {

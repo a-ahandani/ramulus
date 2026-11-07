@@ -33,6 +33,7 @@ const OPS = {
   writeIndex: (dir, b) => git.writeIndex(dir, b.path, b.content, b.expected),
   writeWorkdir: (dir, b) => git.writeWorkdir(dir, b.path, b.content, b.expected),
   openPath: (dir, b) => git.openPath(dir, b.path),
+  revealPath: (dir, b) => git.revealPath(dir, b.path),
   stage: (dir, b) => git.stage(dir, b.paths),
   unstage: (dir, b) => git.unstage(dir, b.paths),
   discard: (dir, b) => git.discard(dir, b.files),
