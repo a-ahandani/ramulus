@@ -1,6 +1,6 @@
 [package]
 name = "ramulus"
-version = "0.13.0"
+version = "0.13.1"
 edition = "2021"
 license = "MIT"
 description = "Every branch of your repository in one graph. Runs a local server on top of your installed git and opens the UI in your browser."
