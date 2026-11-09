@@ -216,6 +216,13 @@ export function createTerminals(dir) {
         .sort(([, a], [, b]) => a.seq - b.seq)
         .map(([k, s]) => ({ id: k.slice(prefix.length), kind: s.kind, agent: s.agent, title: s.title }))
     },
+    /** Puts the folder's tabs in this order, which is also the one they come back in; the tabs keep the places they had between them. */
+    order(repo, ids) {
+      const list = [...new Set(ids)].map((id) => sessions.get(key(repo, id))).filter(Boolean)
+      const seqs = list.map((s) => s.seq).sort((a, b) => a - b)
+      list.forEach((s, i) => (s.seq = seqs[i]))
+      save(false)
+    },
     /**
      * The agent sessions this folder's tabs hold: Claude Code tabs by id, resumed tabs by what they resumed, and for
      * the other agents, whatever changed since a running new tab of theirs started, since that tab's id is not known.

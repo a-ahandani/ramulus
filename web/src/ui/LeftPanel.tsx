@@ -33,16 +33,19 @@ export interface LeftProps {
   merged: number
   onCleanup: () => void
   detail: JSX.Element
+  /** the agent and terminal tabs, when the helper can run them */
+  agents?: JSX.Element
 }
 
 /** Changes is always the working tree; Commit is the commit selected in the graph. */
-export type LeftMode = 'branches' | 'changes' | 'commit' | 'files'
+export type LeftMode = 'branches' | 'changes' | 'commit' | 'files' | 'agents'
 
 const MODES: { id: LeftMode; label: string; icon: string }[] = [
   { id: 'branches', label: 'Branches', icon: 'git-branch' },
   { id: 'changes', label: 'Changes', icon: 'source-control' },
   { id: 'commit', label: 'Commit', icon: 'git-commit' },
   { id: 'files', label: 'Files', icon: 'files' },
+  { id: 'agents', label: 'Agents', icon: 'sparkle' },
 ]
 
 function PrLink({ pr, onMerge, onOpen }: { pr?: PullRequest; onMerge?: (pr: PullRequest) => void; onOpen?: (pr: PullRequest) => void }) {
@@ -122,7 +125,7 @@ export function LeftPanel(p: LeftProps) {
   const stashes = p.data.stashes.filter((s) => show(s.message))
   const modes = (
     <div class="left-modes" role="tablist" aria-label="Left panel">
-      {MODES.map((m) => (
+      {MODES.filter((m) => m.id !== 'agents' || p.agents).map((m) => (
         <button
           key={m.id}
           role="tab"
@@ -142,7 +145,7 @@ export function LeftPanel(p: LeftProps) {
     return (
       <div class="left tabbed">
         {modes}
-        {p.mode === 'files' ? <FileExplorer load={p.loadFiles} status={p.data.status} stamp={p.stamp} selected={p.selectedFile} onOpen={p.onOpenFile} /> : p.detail}
+        {p.mode === 'files' ? <FileExplorer load={p.loadFiles} status={p.data.status} stamp={p.stamp} selected={p.selectedFile} onOpen={p.onOpenFile} /> : p.mode === 'agents' ? p.agents : p.detail}
       </div>
     )
   }

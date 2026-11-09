@@ -253,3 +253,102 @@ export function Avatar({ name, email, color, size = 20 }: { name: string; email:
     </span>
   )
 }
+
+/** `list` with the item at `from` moved to `to`. */
+export function moved<T>(list: T[], from: number, to: number): T[] {
+  const out = [...list]
+  out.splice(to, 0, ...out.splice(from, 1))
+  return out
+}
+
+/** Where a dragged item lands: past every other item whose middle it has passed. */
+export const dropAt = (mids: number[], from: number, at: number) => mids.filter((m, i) => i !== from && m < at).length
+
+/**
+ * Drag to reorder, by the pointer so it works in the desktop window too. The item follows the pointer and the others
+ * of its group (the siblings with the same data-sort) slide aside, all on the DOM; the order changes once, on drop.
+ */
+export function sortDrag(e: PointerEvent, axis: 'x' | 'y', onDrop: (from: number, to: number) => void) {
+  const item = e.currentTarget as HTMLElement
+  const box = item.parentElement
+  if (e.button !== 0 || !box || (e.target as Element).closest('button, input')) return
+  const items = [...box.children].filter((el): el is HTMLElement => el instanceof HTMLElement && el.dataset.sort === item.dataset.sort)
+  const from = items.indexOf(item)
+  const x = axis === 'x'
+  const start = (el: HTMLElement) => (x ? el.getBoundingClientRect().left : el.getBoundingClientRect().top)
+  const size = (el: HTMLElement) => (x ? el.offsetWidth : el.offsetHeight)
+  const mids = items.map((el) => start(el) + size(el) / 2)
+  // the others move by the dragged item's length and the gap after it
+  const step = size(item) + (items.length > 1 ? start(items[1]) - start(items[0]) - size(items[0]) : 0)
+  const shift = (el: HTMLElement, d: number) => (el.style.transform = d ? `translate${x ? 'X' : 'Y'}(${d}px)` : '')
+  const p0 = x ? e.clientX : e.clientY
+  let to = from
+  let live = false
+  const move = (ev: PointerEvent) => {
+    const d = (x ? ev.clientX : ev.clientY) - p0
+    if (!live && Math.abs(d) < 5) return
+    if (!live) {
+      live = true
+      document.body.classList.add('dragging')
+      box.dataset.sorting = ''
+      item.dataset.lifted = ''
+    }
+    shift(item, d)
+    to = dropAt(mids, from, mids[from] + d)
+    items.forEach((el, i) => i !== from && shift(el, i > from && i <= to ? -step : i < from && i >= to ? step : 0))
+  }
+  const end = (drop: boolean) => {
+    removeEventListener('pointermove', move)
+    removeEventListener('pointerup', up)
+    removeEventListener('pointercancel', cancel)
+    removeEventListener('keydown', esc, true)
+    if (!live) return
+    document.body.classList.remove('dragging')
+    // the click that ends a drag must not also open the tab
+    const swallow = (ev: Event) => ev.stopPropagation()
+    addEventListener('click', swallow, true)
+    setTimeout(() => removeEventListener('click', swallow, true))
+    const was = start(item)
+    const reorder = drop && to !== from
+    // the others jump to their new places in the same frame as the DOM reorders under them, so nothing moves twice
+    if (reorder) delete box.dataset.sorting
+    items.forEach((el) => shift(el, 0))
+    if (reorder) onDrop(from, to)
+    requestAnimationFrame(() => {
+      // the dragged one glides from where it was let go into its place
+      shift(item, was - start(item))
+      item.style.transition = 'transform 150ms ease'
+      item.getBoundingClientRect()
+      shift(item, 0)
+      setTimeout(() => {
+        item.style.transition = ''
+        delete item.dataset.lifted
+        delete box.dataset.sorting
+      }, 150)
+    })
+  }
+  const up = () => end(true)
+  const cancel = () => end(false)
+  const esc = (ev: KeyboardEvent) => {
+    if (ev.key !== 'Escape') return
+    ev.stopPropagation()
+    end(false)
+  }
+  addEventListener('pointermove', move)
+  addEventListener('pointerup', up)
+  addEventListener('pointercancel', cancel)
+  addEventListener('keydown', esc, true)
+}
+
+/** Alt and the arrow keys move the focused item one place, the keyboard's drag. */
+export function sortKey(e: KeyboardEvent, axis: 'x' | 'y', from: number, count: number, onDrop: (from: number, to: number) => void) {
+  const step = { [axis === 'x' ? 'ArrowLeft' : 'ArrowUp']: -1, [axis === 'x' ? 'ArrowRight' : 'ArrowDown']: 1 }[e.key]
+  if (!e.altKey || !step) return
+  e.preventDefault()
+  const to = from + step
+  if (to < 0 || to >= count) return
+  const el = e.currentTarget as HTMLElement
+  onDrop(from, to)
+  // moving a node in the DOM can take the keyboard from it
+  requestAnimationFrame(() => el.focus())
+}

@@ -2,13 +2,15 @@ import { useEffect, useRef, useState } from 'preact/hooks'
 import { DEFAULT_PROMPTS, fillPrompt } from '../git/ai'
 import type { AgentSession, AiSettings, Backend, TermKind, TermTab } from '../git/backend'
 import { AgentTerminal } from './Ai'
-import { AgentLogo, Icon, clamp, finished, sessionMeta, stored, termTitle } from './bits'
+import { AgentLogo, Icon, finished, moved, sessionMeta, sortDrag, sortKey, termTitle } from './bits'
 import type { MenuState } from './Menu'
-import { Splitter } from './Splitter'
 
 const PAGE_TAG = Date.now().toString(36)
 
-/** The agent and terminal tabs of one repository, and the panel at the bottom that shows them. */
+/**
+ * The agent and terminal tabs of one repository: listed in the left panel, and in the editor's tab strip, with the one
+ * in front filling the main area.
+ */
 export function useAgentPanel(p: {
   be: Backend
   active: boolean
@@ -19,21 +21,23 @@ export function useAgentPanel(p: {
   openAiSettings: () => void
   say: (e: unknown) => void
   setMenu: (m: MenuState) => void
+  /** whether the left panel shows the list, which is where the conversations to resume are */
+  listing: boolean
+  /** asks the left panel to show the list */
+  onList: () => void
 }) {
   const [terms, setTerms] = useState<TermTab[]>([])
   const [termActive, setTermActive] = useState<string>()
   const [termRunning, setTermRunning] = useState<Record<string, boolean>>({})
   const termSeq = useRef(0)
+  /** an agent or terminal tab, rather than the graph or a file, is what the main area shows */
   const [shown, setShown] = useState(false)
   const [focus, setFocus] = useState(false)
-  const [max, setMax] = useState(false)
-  const [height, setHeight] = useState(() => Number(stored('ramulus.drawer')) || 280)
   const [paste, setPaste] = useState<{ id: number; text: string; tab: string }>()
   const [restart, setRestart] = useState({ tab: '', n: 0 })
   const [waiting, setWaiting] = useState<Set<string>>(new Set())
-  /** the folder's agent conversations that no tab has open, and whether the History tab is the one showing */
+  /** the folder's agent conversations that no tab has open */
   const [past, setPast] = useState<AgentSession[]>([])
-  const [history, setHistory] = useState(false)
   const [query, setQuery] = useState('')
   const search = useRef<HTMLInputElement>(null)
   const termsRef = useRef(terms)
@@ -44,15 +48,9 @@ export function useAgentPanel(p: {
   const lookingRef = useRef(looking)
   lookingRef.current = looking
   // A tab's terminal is made the first time it shows and then kept behind the others, so coming back to it, to this
-  // repository or to the panel is instant.
+  // repository or from the graph is instant.
   const made = useRef(new Set<string>())
-  if (looking && !history) made.current.add(looking)
-  const drawer = useRef<HTMLDivElement>(null)
-  const dragged = useRef(height)
-
-  useEffect(() => {
-    localStorage.setItem('ramulus.drawer', String(height))
-  }, [height])
+  if (looking) made.current.add(looking)
 
   const unwait = (ids: string[]) => setWaiting((w) => (ids.some((id) => w.has(id)) ? new Set([...w].filter((id) => !ids.includes(id))) : w))
   useEffect(() => {
@@ -69,7 +67,6 @@ export function useAgentPanel(p: {
   // Only explicit opens take the keyboard, not the remount that comes with switching repositories.
   const show = (id: string) => {
     setTermActive(id)
-    setHistory(false)
     setShown(true)
     setFocus(true)
   }
@@ -81,19 +78,26 @@ export function useAgentPanel(p: {
     return t
   }
 
-  // Looked up when the folder opens and whenever a tab opens or closes, since closing one is what makes its conversation resumable.
+  // The helper saves the order, so the tabs come back in it.
+  const reorder = (from: number, to: number) => {
+    const next = moved(termsRef.current, from, to)
+    setTerms(next)
+    p.be.termOrder?.(next.map((t) => t.id)).catch(() => {})
+  }
+
+  // Looked up when the folder opens, when the list shows and whenever a tab opens or closes, since closing one is what
+  // makes its conversation resumable.
   const canResume = !!p.be.agentSessions && p.agents.length > 0
-  const refresh = () => {
+  useEffect(() => {
     if (!canResume) return setPast([])
     // a tab just opened to resume one may not have reached the helper yet
     p.be.agentSessions!().then((list) => setPast(list.filter((s) => !termsRef.current.some((t) => t.resume === s.id))), () => {})
-  }
-  useEffect(refresh, [canResume, terms.length])
+  }, [canResume, terms.length, p.listing])
 
-  const openHistory = () => {
-    setHistory(true)
-    setShown(true)
-    refresh()
+  // only an explicit open takes the keyboard, not coming back to this repository
+  const openList = () => {
+    p.onList()
+    requestAnimationFrame(() => search.current?.focus())
   }
 
   const resume = (s: AgentSession) => {
@@ -104,10 +108,6 @@ export function useAgentPanel(p: {
   const agentName = (id: string) => p.agents.find((a) => a.id === id)?.name ?? id
   const words = query.trim().toLowerCase().split(/\s+/).filter(Boolean)
   const found = past.filter((s) => words.every((w) => `${s.title} ${agentName(s.agent)}`.toLowerCase().includes(w)))
-  // like the tabs, only opening History takes the keyboard, not coming back to this repository
-  useEffect(() => {
-    if (history && shown && p.active) search.current?.focus()
-  }, [history, shown])
 
   const openAgent = async (conflictFile?: string) => {
     const picked = await p.pickAgent().catch((e) => void p.say(e))
@@ -120,7 +120,7 @@ export function useAgentPanel(p: {
   const toggle = async () => {
     if (shown) return setShown(false)
     if (activeTerm) return show(activeTerm.id)
-    if (past.length) return openHistory()
+    if (past.length) return openList()
     if (!p.be.termStart || !p.be.ai) return p.say('Run npx ramulus in a repository to use your AI agent here')
     const info = await p.be.ai().catch(() => undefined)
     if (info && (info.settings.enabled === false || info.agents.length === 0)) return p.openAiSettings()
@@ -130,15 +130,14 @@ export function useAgentPanel(p: {
   const close = (id: string) => {
     p.be.termStop?.(id).catch(() => {})
     made.current.delete(id)
+    const i = terms.findIndex((t) => t.id === id)
     const rest = terms.filter((t) => t.id !== id)
     setTerms(rest)
     unwait([id])
-    if (activeTerm?.id === id) setTermActive(rest[rest.length - 1]?.id)
+    // like an editor tab, the one beside it comes to the front
+    if (activeTerm?.id === id) setTermActive(rest[Math.min(i, rest.length - 1)]?.id)
     if (paste?.tab === id) setPaste(undefined)
-    if (rest.length === 0 && !history) {
-      setShown(false)
-      setMax(false)
-    }
+    if (rest.length === 0) setShown(false)
   }
 
   const closeAll = () => {
@@ -148,9 +147,7 @@ export function useAgentPanel(p: {
     setTerms([])
     setWaiting(new Set())
     setTermActive(undefined)
-    setHistory(false)
     setShown(false)
-    setMax(false)
   }
 
   const newTermMenu = (e: MouseEvent) => {
@@ -166,11 +163,12 @@ export function useAgentPanel(p: {
     })
   }
 
+  // The tabs open when Ramulus last closed come back in the order they had, the last one in front, which starts it
+  // again so its title stops saying it was working when Ramulus closed.
   useEffect(() => {
     p.be.termList?.().then((list) => {
       if (!list.length) return
       setTerms((ts) => [...list, ...ts])
-      // the tabs open when Ramulus last closed come back where they were
       setShown(true)
     }, () => {})
     return () => void p.be.termStop?.().catch(() => {})
@@ -180,7 +178,7 @@ export function useAgentPanel(p: {
   // Agents are watched in hidden repositories too, more slowly, so the sidebar can say when one finishes.
   const watching = p.active && shown
   useEffect(() => {
-    if (!p.be.termList || !terms.length || (!watching && !terms.some((t) => t.kind === 'agent'))) return
+    if (!p.be.termList || !terms.length || (!p.active && !terms.some((t) => t.kind === 'agent'))) return
     const timer = setInterval(
       () =>
         p.be.termList!().then((list) => {
@@ -193,104 +191,97 @@ export function useAgentPanel(p: {
       watching ? 1500 : 4000,
     )
     return () => clearInterval(timer)
-  }, [watching, terms.length])
+  }, [watching, p.active, terms.length])
 
-  const view = (history || activeTerm) && (
-    <div ref={drawer} class="agent-drawer" hidden={!shown} style={max ? undefined : { height: `${height}px` }}>
-      {!max && (
-        <Splitter
-          horizontal
-          // the drag moves only the panel; the rest of the window renders again once, when it ends
-          onDrag={(dy) => {
-            dragged.current = clamp(dragged.current - dy, 120, innerHeight - 200)
-            drawer.current!.style.height = `${dragged.current}px`
-          }}
-          onEnd={() => setHeight(dragged.current)}
-        />
-      )}
-      <div class="drawer-head">
-        <div class="term-tabs" role="tablist" aria-label="Agent and terminal tabs">
-          {terms.map((t) => (
-            <div
-              key={t.id}
-              role="tab"
-              tabIndex={0}
-              aria-selected={!history && t.id === activeTerm?.id}
-              class={`term-tab ${!history && t.id === activeTerm?.id ? 'active' : ''} ${termRunning[t.id] === false ? 'stopped' : ''} ${termTitle(t).busy ? 'busy' : ''} ${waiting.has(t.id) ? 'waiting' : ''}`}
-              title={termRunning[t.id] === false ? `${label(t)} (stopped)` : waiting.has(t.id) ? `${label(t)} (finished)` : label(t)}
-              onClick={() => show(t.id)}
-              onKeyDown={(e) => (e.key === 'Enter' || e.key === ' ') && show(t.id)}
-            >
-              {t.kind === 'shell' || termTitle(t).busy ? <Icon name={t.kind === 'shell' ? 'terminal' : 'loading'} /> : <AgentLogo agent={t.agent} />}
-              <span class="label">{label(t)}</span>
-              <button
-                class="icon"
-                title="Close this tab"
-                aria-label={`Close ${label(t)}`}
-                onClick={(e) => {
-                  e.stopPropagation()
-                  close(t.id)
-                }}
-              >
-                <Icon name="close" />
-              </button>
-            </div>
-          ))}
-          {(past.length > 0 || history) && (
-            <div
-              role="tab"
-              tabIndex={0}
-              aria-selected={history}
-              class={`term-tab ${history ? 'active' : ''}`}
-              title="Agent conversations in this folder that no tab has open"
-              onClick={openHistory}
-              onKeyDown={(e) => (e.key === 'Enter' || e.key === ' ') && openHistory()}
-            >
-              <Icon name="history" />
-              <span class="label">History</span>
-            </div>
-          )}
-          <button class="icon" title="New agent or terminal tab" aria-label="New agent or terminal tab" onClick={newTermMenu}>
-            <Icon name="add" />
-          </button>
-        </div>
-        <span class="spacer" />
-        {!history && activeTerm && (
-          <button class="icon" title={`Restart this ${activeTerm.kind === 'shell' ? 'terminal' : 'agent'}`} aria-label="Restart this tab" onClick={() => setRestart((r) => ({ tab: activeTerm.id, n: r.n + 1 }))}>
-            <Icon name="debug-restart" />
-          </button>
-        )}
+  const front = (t: TermTab) => shown && t.id === activeTerm?.id
+  const marks = (t: TermTab) => `${front(t) ? 'active' : ''} ${termRunning[t.id] === false ? 'stopped' : ''} ${termTitle(t).busy ? 'busy' : ''} ${waiting.has(t.id) ? 'waiting' : ''}`
+  const tip = (t: TermTab) => (termRunning[t.id] === false ? `${label(t)} (stopped)` : waiting.has(t.id) ? `${label(t)} (finished)` : label(t))
+  const mark = (t: TermTab) => (t.kind === 'shell' || termTitle(t).busy ? <Icon name={t.kind === 'shell' ? 'terminal' : 'loading'} /> : <AgentLogo agent={t.agent} />)
+  // the same tab, as a row of the list or a tab of the strip; dragging either one reorders both
+  const tab = (t: TermTab, i: number, axis: 'x' | 'y') => (
+    <div
+      key={t.id}
+      data-sort="term"
+      role="tab"
+      tabIndex={0}
+      aria-selected={front(t)}
+      class={`${axis === 'x' ? 'tab' : 'term-row'} term ${marks(t)}`}
+      title={tip(t)}
+      onClick={() => show(t.id)}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault()
+          show(t.id)
+        } else sortKey(e, axis, i, terms.length, reorder)
+      }}
+      onMouseDown={(e) => {
+        if (e.button !== 1) return
+        e.preventDefault()
+        close(t.id)
+      }}
+      onPointerDown={(e) => sortDrag(e, axis, reorder)}
+    >
+      {mark(t)}
+      <span class="name">{label(t)}</span>
+      <button
+        class="icon close"
+        title="Close this tab"
+        aria-label={`Close ${label(t)}`}
+        onClick={(e) => {
+          e.stopPropagation()
+          close(t.id)
+        }}
+      >
+        <span class="dot">
+          <Icon name="circle-filled" />
+        </span>
+        <span class="x">
+          <Icon name="close" />
+        </span>
+      </button>
+    </div>
+  )
+
+  const side = (
+    <div class="agents">
+      <div class="agents-head">
+        <span class="title">Tabs</span>
+        <button class="icon" title="New agent or terminal tab" aria-label="New agent or terminal tab" onClick={newTermMenu}>
+          <Icon name="add" />
+        </button>
         <button class="icon" title="AI agent settings" aria-label="AI agent settings" onClick={p.openAiSettings}>
           <Icon name="settings-gear" />
         </button>
-        <button class="icon" title={max ? 'Restore the panel' : 'Maximize the panel'} aria-label={max ? 'Restore the panel' : 'Maximize the panel'} onClick={() => setMax((m) => !m)}>
-          <Icon name={max ? 'screen-normal' : 'screen-full'} />
-        </button>
-        <button class="icon" title="Hide the panel (⌃`)" aria-label="Hide the panel" onClick={() => setShown(false)}>
-          <Icon name="chevron-down" />
-        </button>
       </div>
-      {(history || !activeTerm) && (
-        <div class="past" role="tabpanel" aria-label="Agent conversations to resume">
-          {past.length > 0 && (
-            <div class="past-search">
-              <input
-                ref={search}
-                placeholder="Search conversations"
-                aria-label="Search conversations"
-                value={query}
-                onInput={(e) => setQuery((e.target as HTMLInputElement).value)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter' && found[0]) resume(found[0])
-                  if (e.key === 'Escape' && query) {
-                    e.stopPropagation()
-                    setQuery('')
-                  }
-                }}
-              />
-            </div>
-          )}
-          <div class="past-list">
+      <div class="term-list" role="tablist" aria-orientation="vertical" aria-label="Agent and terminal tabs">
+        {terms.map((t, i) => tab(t, i, 'y'))}
+        {!terms.length && <div class="past-empty">No agent or terminal tabs. Start one with +.</div>}
+      </div>
+      {past.length > 0 && (
+        <>
+          <div class="agents-head">
+            <span class="title">History</span>
+            <span class="count" title="Agent conversations in this folder that no tab has open">
+              {past.length}
+            </span>
+          </div>
+          <div class="past-search">
+            <input
+              ref={search}
+              placeholder="Search conversations"
+              aria-label="Search conversations"
+              value={query}
+              onInput={(e) => setQuery((e.target as HTMLInputElement).value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && found[0]) resume(found[0])
+                if (e.key === 'Escape' && query) {
+                  e.stopPropagation()
+                  setQuery('')
+                }
+              }}
+            />
+          </div>
+          <div class="past-list" aria-label="Agent conversations to resume">
             {found.map((s) => (
               <button key={`${s.agent} ${s.id}`} class="past-row" title={`Resume this ${agentName(s.agent)} conversation in a new tab`} onClick={() => resume(s)}>
                 <AgentLogo agent={s.agent} />
@@ -298,10 +289,15 @@ export function useAgentPanel(p: {
                 <span class="past-meta">{sessionMeta(s, agentName(s.agent))}</span>
               </button>
             ))}
-            {!found.length && <div class="past-empty">{past.length ? 'No conversation matches that.' : 'No other agent conversations in this folder.'}</div>}
+            {!found.length && <div class="past-empty">No conversation matches that.</div>}
           </div>
-        </div>
+        </>
       )}
+    </div>
+  )
+
+  const panes = (
+    <div key="terms" class="diff-pane term-panes" hidden={!shown}>
       {terms
         .filter((t) => made.current.has(t.id))
         .map((t) => (
@@ -313,7 +309,7 @@ export function useAgentPanel(p: {
             agent={t.agent}
             resume={t.resume}
             look={p.look}
-            shown={!history && t.id === activeTerm?.id}
+            shown={t.id === activeTerm?.id}
             focus={focus && t.id === activeTerm?.id}
             onFocused={() => setFocus(false)}
             paste={paste?.tab === t.id ? paste : undefined}
@@ -325,15 +321,27 @@ export function useAgentPanel(p: {
     </div>
   )
 
-  const open = (terms.length > 0 || history) && shown
+  const actions = activeTerm && (
+    <button class="icon" title={`Restart this ${activeTerm.kind === 'shell' ? 'terminal' : 'agent'}`} aria-label="Restart this tab" onClick={() => setRestart((r) => ({ tab: activeTerm.id, n: r.n + 1 }))}>
+      <Icon name="debug-restart" />
+    </button>
+  )
+
   return {
     list: terms,
     shown,
-    view,
-    cls: `${open ? 'with-drawer' : ''} ${open && max ? 'drawer-max' : ''}`,
+    /** the list, for the left panel */
+    side,
+    /** the tabs, for the editor's tab strip */
+    tabs: terms.map((t, i) => tab(t, i, 'x')),
+    /** the terminals, for the main area */
+    panes,
+    /** the buttons for the tab in front, for the tab strip */
+    actions,
     /** what the sidebar and the Agent button say about this repository's agents */
     state: (waiting.size ? 'waiting' : terms.some((t) => termTitle(t).busy) ? 'working' : undefined) as 'waiting' | 'working' | undefined,
     show,
+    hide: () => setShown(false),
     add,
     openAgent,
     toggle,

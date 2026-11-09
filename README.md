@@ -34,7 +34,7 @@ Prefer an app? [Download Ramulus](https://github.com/a-ahandani/ramulus/releases
 
 Ramulus finds Claude Code, Codex, Gemini CLI or opencode on your computer and asks before using any of them. Each one uses its own sign-in, so there's no API key to set up.
 
-- Press ⌃\` to open the agent panel under the graph and chat with it, just like in your own terminal. Open more tabs for other agents or a plain shell.
+- Press ⌃\` to open your agent in a tab beside the graph and your files, and chat with it just like in your own terminal. Open more tabs for other agents or a plain shell; the Agents list on the left holds them all, and you drag tabs in either place to reorder them.
 - Everything the agent edits shows up as a change for you to review before you commit.
 - One click drafts a commit message or a branch name, ready for you to edit.
 - Stuck on a merge conflict? One click hands the file to your agent with a prompt you can change first.
@@ -58,7 +58,7 @@ Ramulus finds Claude Code, Codex, Gemini CLI or opencode on your computer and as
 | `⌘⇧A` | Search your repositories |
 | `⌘⏎` | Commit |
 | `⌘B` | New branch |
-| `` ⌃` `` | Show or hide the agent panel |
+| `` ⌃` `` | Show your agent, or go back from it |
 | `?` | All shortcuts |
 
 On Windows and Linux, use Ctrl for ⌘ and Alt for ⌥.

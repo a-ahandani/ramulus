@@ -150,6 +150,7 @@ export function httpBackend(base: string, token: string, repo?: string): Backend
     termStart: (id, kind, agent, cols, rows, resume) => call('termStart', { id, kind, agent, cols, rows, resume }),
     agentSessions: () => call('agentSessions'),
     termList: () => call('termList'),
+    termOrder: (ids) => call('termOrder', { ids }),
     termStop: (id) => call('termStop', id ? { id } : { all: true }),
     termAttach: (id, onData, onExit) => (terms ??= termSocket(base, token)).attach(repo, id, onData, onExit),
     subscribe: (onChange) => {

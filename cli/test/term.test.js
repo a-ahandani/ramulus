@@ -45,15 +45,21 @@ describe('terminals', () => {
     // a second helper beside this one leaves its saved tabs alone
     assert.deepEqual(createTerminals(dir).list(root), [])
     assert.deepEqual(first.list(root), [{ id: 'sh', kind: 'shell', agent: undefined, title: 'titled' }])
+    // a drag in the page reorders the tabs, and they come back in that order
+    await first.start(root, 'b', 'shell', '', 80, 24, env)
+    first.order(root, ['b', 'sh', 'gone'])
+    assert.deepEqual(first.list(root).map((t) => t.id), ['b', 'sh'])
     first.stopAll()
 
     const again = createTerminals(dir)
-    assert.deepEqual(again.list(root), [{ id: 'sh', kind: 'shell', agent: undefined, title: 'titled' }])
+    assert.deepEqual(again.list(root).map((t) => t.id), ['b', 'sh'])
+    assert.deepEqual(again.list(root)[1], { id: 'sh', kind: 'shell', agent: undefined, title: 'titled' })
     assert.equal((await again.start(root, 'sh', 'shell', '', 80, 24, env)).fresh, true)
     const replay = watch(again, 'sh')
     await replay('kept-42')
     await replay('new session')
     again.stop(root, 'sh')
+    again.stop(root, 'b')
     again.stopAll()
     assert.deepEqual(createTerminals(dir).list(root), [])
   })

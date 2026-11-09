@@ -194,6 +194,8 @@ export interface Backend {
   termStart?(id: string, kind: TermKind, agent: string | undefined, cols: number, rows: number, resume?: string): Promise<{ agent?: string; fresh: boolean }>
   agentSessions?(): Promise<AgentSession[]>
   termList?(): Promise<TermTab[]>
+  /** saves the order of this folder's tabs, the one they come back in */
+  termOrder?(ids: string[]): Promise<void>
   termStop?(id?: string): Promise<void>
   /** Connects to a tab: what it printed so far arrives with `replay` set, then its output as it prints, then `onExit`. */
   termAttach?(id: string, onData: (data: string, replay: boolean) => void, onExit: () => void): TermLink

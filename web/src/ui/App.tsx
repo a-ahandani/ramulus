@@ -6,7 +6,7 @@ import { PAGE, type Commit, type DiffArea, type FileChange, type NetSettings, ty
 import type { Scheme } from '../git/scheme'
 import { AiConsent, AiSettingsDialog } from './Ai'
 import { useAgentPanel } from './AgentPanel'
-import { BrandMark, CI_WORD, Icon, RepoMark, SHOW_IN_FILES, SHOW_REPO_IN_FILES, cannotFastForward, ciByCommit, ciState, clamp, laneColor, mergedBranches, prsByBranch, short, stored, webUrl, wipTally } from './bits'
+import { BrandMark, CI_WORD, Icon, RepoMark, SHOW_IN_FILES, SHOW_REPO_IN_FILES, cannotFastForward, ciByCommit, ciState, clamp, laneColor, mergedBranches, moved, prsByBranch, short, stored, webUrl, wipTally } from './bits'
 import { DetailPanel, type FileSel } from './DetailPanel'
 import { PrCard } from './PrView'
 import { DiffWindow, tabKey, type DiffOptions, type DiffTab } from './DiffWindow'
@@ -400,6 +400,7 @@ export function App(p: { be: Backend; name: string; active: boolean; theme: Them
     select(i)
     setScrollTo(i)
     setOnGraph(true)
+    panel.hide()
   }
 
   const copy = (s: string) => {
@@ -487,7 +488,21 @@ export function App(p: { be: Backend; name: string; active: boolean; theme: Them
       (e) => fail('Could not read the AI settings', e),
     )
 
-  const panel = useAgentPanel({ be: p.be, active: p.active, look, agents: aiReady ? (aiInfo?.agents ?? []) : [], pickAgent, openAiSettings, say, setMenu })
+  const panel = useAgentPanel({
+    be: p.be,
+    active: p.active,
+    look,
+    agents: aiReady ? (aiInfo?.agents ?? []) : [],
+    pickAgent,
+    openAiSettings,
+    say,
+    setMenu,
+    listing: showLeft && (!view || leftMode === 'agents'),
+    onList: () => {
+      setLeftMode('agents')
+      setShowLeft(true)
+    },
+  })
 
   useEffect(() => {
     if (noGit) p.onSummary({ branch: '', changes: 0, ahead: 0, behind: 0, busy: false, noGit, agent: panel.state })
@@ -511,7 +526,7 @@ export function App(p: { be: Backend; name: string; active: boolean; theme: Them
     if (!p.be.ai) return []
     const list: Command[] = [{ id: 'ai-settings', group: 'AI', label: 'AI agent settings', run: openAiSettings }]
     if (!p.be.termStart) return list
-    list.push({ id: 'ai-term', group: 'AI', label: panel.shown ? 'Hide the agent panel' : 'Show the agent panel', hint: '⌃`', run: panel.toggle })
+    list.push({ id: 'ai-term', group: 'AI', label: panel.shown ? 'Go back from the agent tab' : 'Show the agent tab', hint: '⌃`', run: panel.toggle })
     list.push({ id: 'term-new', group: 'AI', label: 'New terminal tab', run: () => void panel.add('shell') })
     if (panel.list.length) list.push({ id: 'ai-stop', group: 'AI', label: 'Close every agent and terminal tab', run: panel.closeAll })
     if (!aiReady) return list
@@ -803,6 +818,7 @@ export function App(p: { be: Backend; name: string; active: boolean; theme: Them
   const showTab = (key: string) => {
     setActiveDiff(key)
     setOnGraph(false)
+    panel.hide()
   }
   const openFile = (f: FileSel) => {
     const key = tabKey(f)
@@ -949,7 +965,8 @@ export function App(p: { be: Backend; name: string; active: boolean; theme: Them
         panel.toggle()
         return
       }
-      if (e.target instanceof Element && e.target.closest('.diff-pane, .agent-drawer')) return
+      // a key a list or tab already used, such as Alt+arrows reordering, is not also a shortcut
+      if (e.defaultPrevented || (e.target instanceof Element && e.target.closest('.diff-pane'))) return
       const mod = e.metaKey || e.ctrlKey
       const typing = e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement || (e.target instanceof HTMLElement && e.target.isContentEditable)
       if (mod && (e.key === 'p' || e.key === 'P')) {
@@ -1096,8 +1113,10 @@ export function App(p: { be: Backend; name: string; active: boolean; theme: Them
   )
 
   if (!view) {
+    // a folder without git, or a repository that could not be read, still runs agents and terminals
+    const bare = !!p.be.termStart && !busy
     return (
-      <div class={`app ${panel.cls}`}>
+      <div class="app">
         <div class="toolbar">
           {noGit && (
             <>
@@ -1113,36 +1132,60 @@ export function App(p: { be: Backend; name: string; active: boolean; theme: Them
             </>
           )}
         </div>
-        {noGit ? (
-          <div class="placeholder no-git">
-            <Icon name="folder-opened" />
-            <div class="ng-name">{p.name}</div>
-            <div class="ng-note">No git repository yet</div>
-            <div class="ng-acts">
-              {p.be.init && (
-                <button class="primary" onClick={initRepo}>
-                  <Icon name="git-branch-create" />
-                  Initialize git
-                </button>
-              )}
-              {p.be.termStart && (
-                <>
-                  <button class="secondary" onClick={() => void panel.openAgent()}>
-                    <Icon name="sparkle" />
-                    Agent
+        <div class={`body ${bare && showLeft ? '' : 'no-left'}`} style={{ '--left-w': `${leftW}px` }}>
+          {bare && <div class="left tabbed">{panel.side}</div>}
+          {bare && <Splitter onDrag={(dx) => setLeftW((w) => clamp(w + dx, 240, 760))} />}
+          {noGit ? (
+            <div class="placeholder no-git">
+              <Icon name="folder-opened" />
+              <div class="ng-name">{p.name}</div>
+              <div class="ng-note">No git repository yet</div>
+              <div class="ng-acts">
+                {p.be.init && (
+                  <button class="primary" onClick={initRepo}>
+                    <Icon name="git-branch-create" />
+                    Initialize git
                   </button>
-                  <button class="secondary" onClick={() => void panel.add('shell')}>
-                    <Icon name="terminal" />
-                    Terminal
-                  </button>
-                </>
-              )}
+                )}
+                {p.be.termStart && (
+                  <>
+                    <button class="secondary" onClick={() => void panel.openAgent()}>
+                      <Icon name="sparkle" />
+                      Agent
+                    </button>
+                    <button class="secondary" onClick={() => void panel.add('shell')}>
+                      <Icon name="terminal" />
+                      Terminal
+                    </button>
+                  </>
+                )}
+              </div>
             </div>
-          </div>
-        ) : (
-          <div class="placeholder">{busy ? `${busy}...` : 'This repository could not be read.'}</div>
-        )}
-        {panel.view}
+          ) : (
+            <div class="placeholder">{busy ? `${busy}...` : 'This repository could not be read.'}</div>
+          )}
+          {bare && panel.list.length > 0 && (
+            <div class={`diff-window ${panel.shown ? '' : 'on-graph'}`} role="region" aria-label="Agent and terminal tabs">
+              <div class="diff-tabs">
+                <div
+                  class={`tab pinned ${panel.shown ? '' : 'active'}`}
+                  title="This folder"
+                  role="tab"
+                  tabIndex={0}
+                  aria-selected={!panel.shown}
+                  onClick={panel.hide}
+                  onKeyDown={(e) => (e.key === 'Enter' || e.key === ' ') && panel.hide()}
+                >
+                  <Icon name="folder" />
+                  <span class="name">Folder</span>
+                </div>
+                <div class="tab-strip">{panel.tabs}</div>
+                <div class="actions">{panel.actions}</div>
+              </div>
+              {panel.panes}
+            </div>
+          )}
+        </div>
         {statusBar()}
         {menu && <Menu menu={menu} onClose={() => setMenu(undefined)} />}
         {shortcuts && <Shortcuts onClose={() => setShortcuts(false)} />}
@@ -1202,7 +1245,7 @@ export function App(p: { be: Backend; name: string; active: boolean; theme: Them
     })
 
   return (
-    <div class={`app ${panel.cls}`}>
+    <div class="app">
       <div class="toolbar">
         <div class="tb-side">
           <RepoMark url={v.data.originUrl} />
@@ -1295,6 +1338,7 @@ export function App(p: { be: Backend; name: string; active: boolean; theme: Them
           hasCommit={!!current}
           merged={merged.length}
           onCleanup={() => cleanupMerged(merged)}
+          agents={p.be.termStart ? panel.side : undefined}
           detail={
             <DetailPanel
               pr={
@@ -1364,10 +1408,10 @@ export function App(p: { be: Backend; name: string; active: boolean; theme: Them
           onScrolled={() => setScrollTo(undefined)}
           onClearSolo={() => setSolo(new Set())}
         />
-        {activeTab && (
+        {(activeTab || panel.list.length > 0) && (
           <DiffWindow
             tabs={diffTabs}
-            active={activeTab.key}
+            active={activeTab?.key ?? ''}
             shown={p.active}
             be={v.be}
             stamp={v}
@@ -1375,8 +1419,11 @@ export function App(p: { be: Backend; name: string; active: boolean; theme: Them
             look={look}
             actionsFor={actionsFor}
             onActivate={showTab}
-            onGraph={onGraph}
-            onShowGraph={() => setOnGraph(true)}
+            onGraph={!panel.shown && (onGraph || !activeTab)}
+            onShowGraph={() => {
+              setOnGraph(true)
+              panel.hide()
+            }}
             onCloseTab={closeTab}
             onCloseAll={closeAllTabs}
             onOptions={setDiffOptions}
@@ -1391,10 +1438,14 @@ export function App(p: { be: Backend; name: string; active: boolean; theme: Them
             onStage={(files) => run('Staging', () => v.be.stage(files), { statusOnly: true })}
             onUnstage={(paths) => run('Unstaging', () => v.be.unstage(paths), { statusOnly: true })}
             busy={!!busy}
+            onReorder={(from, to) => setDiffTabs((ts) => moved(ts, from, to))}
+            termTabs={panel.tabs}
+            termActions={panel.actions}
+            termPanes={panel.panes}
+            termShown={panel.shown}
           />
         )}
       </div>
-      {panel.view}
       {statusBar(v)}
       {menu && <Menu menu={menu} onClose={() => setMenu(undefined)} />}
       {palette && (

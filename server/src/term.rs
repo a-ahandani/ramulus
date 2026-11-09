@@ -96,7 +96,8 @@ struct State {
 
 /// A terminal tab. It outlives its program: an ended or restored tab starts again as itself.
 struct Session {
-    seq: u64,
+    /// its place among the tabs, which a drag in the page changes
+    seq: AtomicU64,
     kind: &'static str,
     agent: Option<String>,
     /// names the saved output, and is Claude Code's session id so the tab resumes its conversation
@@ -115,7 +116,7 @@ struct Session {
 impl Session {
     fn new(seq: u64, kind: &'static str, agent: Option<String>, uuid: String, buf: String, title: Option<String>, exit: Option<Option<u32>>) -> Session {
         Session {
-            seq,
+            seq: AtomicU64::new(seq),
             kind,
             agent,
             uuid,
@@ -178,7 +179,7 @@ impl Store {
             return;
         }
         let mut list: Vec<(String, Arc<Session>)> = sessions.lock().unwrap().iter().map(|(k, s)| (k.clone(), s.clone())).collect();
-        list.sort_by_key(|(_, s)| s.seq);
+        list.sort_by_key(|(_, s)| s.seq.load(Ordering::Relaxed));
         let saved: Vec<Saved> = list
             .iter()
             .filter_map(|(k, s)| {
@@ -553,7 +554,7 @@ impl Terminals {
                 } else {
                     format!("{}{RESTORED}", st.buf)
                 };
-                let mut s = Session::new(o.seq, o.kind, o.agent.clone(), o.uuid.clone(), buf, st.title.clone(), None);
+                let mut s = Session::new(o.seq.load(Ordering::Relaxed), o.kind, o.agent.clone(), o.uuid.clone(), buf, st.title.clone(), None);
                 s.resume = o.resume.clone();
                 s
             }
@@ -615,7 +616,7 @@ impl Terminals {
             .filter(|(k, _)| k.starts_with(&prefix))
             .map(|(k, s)| {
                 (
-                    s.seq,
+                    s.seq.load(Ordering::Relaxed),
                     Tab {
                         id: k[prefix.len()..].to_string(),
                         kind: s.kind,
@@ -627,6 +628,21 @@ impl Terminals {
             .collect();
         tabs.sort_by_key(|(seq, _)| *seq);
         tabs.into_iter().map(|(_, t)| t).collect()
+    }
+
+    /// Puts the folder's tabs in this order, which is also the one they come back in; the tabs keep the places they had between them.
+    pub fn order(&self, repo: &str, ids: &[String]) {
+        {
+            let sessions = self.sessions.lock().unwrap();
+            let mut seen = HashSet::new();
+            let list: Vec<&Arc<Session>> = ids.iter().filter(|id| seen.insert(id.as_str())).filter_map(|id| sessions.get(&key(repo, id))).collect();
+            let mut seqs: Vec<u64> = list.iter().map(|s| s.seq.load(Ordering::Relaxed)).collect();
+            seqs.sort_unstable();
+            for (s, seq) in list.iter().zip(seqs) {
+                s.seq.store(seq, Ordering::Relaxed);
+            }
+        }
+        self.save_index();
     }
 
     /// The agent sessions this folder's tabs hold: Claude Code tabs by id, resumed tabs by what they resumed, and for

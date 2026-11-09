@@ -52,13 +52,17 @@ fn brings_terminal_tabs_back_after_the_helper_restarts() {
         std::thread::sleep(std::time::Duration::from_millis(100));
     }
     assert_eq!(srv.result("termList", json!({})), titled);
+    // a drag in the page reorders the tabs, and they come back in that order
+    srv.result("termOrder", json!({ "ids": ["ai", "sh", "gone"] }));
+    let ordered = json!([titled[1], titled[0]]);
+    assert_eq!(srv.result("termList", json!({})), ordered);
     srv.app.stop_agents();
 
     // Claude Code saved the conversation, so the tab resumes it rather than starting a new one
     std::fs::create_dir_all(claude_home.join("projects/x")).unwrap();
     std::fs::write(claude_home.join(format!("projects/x/{uuid}.jsonl")), "{}").unwrap();
     let again = start();
-    assert_eq!(again.result("termList", json!({})), titled);
+    assert_eq!(again.result("termList", json!({})), ordered);
     assert_eq!(again.result("termStart", json!({ "id": "sh", "kind": "shell", "cols": 80, "rows": 24 }))["fresh"], true);
     let mut sh = again.term(s(&repo), "sh");
     sh.until("kept-42");

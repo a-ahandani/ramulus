@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { ago, cannotFastForward, ciByCommit, ciState, finished, githubOwner, mergedBranches, prsByBranch, sessionMeta, settleLimited, termTitle, tokenCount, webUrl, wipTally } from './bits'
+import { ago, cannotFastForward, ciByCommit, ciState, dropAt, finished, moved, githubOwner, mergedBranches, prsByBranch, sessionMeta, settleLimited, termTitle, tokenCount, webUrl, wipTally } from './bits'
 
 describe('settleLimited', () => {
   it('never runs more than the limit at once and keeps results in order', async () => {
@@ -141,5 +141,21 @@ describe('agent conversation stats', () => {
     expect(sessionMeta({ agent: 'claude', id: 'a', title: 't', time, context: 163002, cost: 19.413 }, 'Claude Code')).toBe('Claude Code · 163K context · $19.41 · 2h')
     expect(sessionMeta({ agent: 'codex', id: 'b', title: 't', time, context: 117032, window: 258400, tokens: 2809339 }, 'Codex')).toBe('Codex · 117K / 258K context · 2.8M tokens · 2h')
     expect(sessionMeta({ agent: 'opencode', id: 'c', title: 't', time, cost: 0 }, 'opencode')).toBe('opencode · 2h')
+  })
+})
+
+describe('reordering', () => {
+  it('moves one item and keeps the rest in order', () => {
+    expect(moved(['a', 'b', 'c', 'd'], 0, 2)).toEqual(['b', 'c', 'a', 'd'])
+    expect(moved(['a', 'b', 'c', 'd'], 3, 1)).toEqual(['a', 'd', 'b', 'c'])
+    expect(moved(['a', 'b'], 1, 1)).toEqual(['a', 'b'])
+  })
+  it('drops a dragged item past the middles it has passed', () => {
+    const mids = [10, 30, 50]
+    expect(dropAt(mids, 0, 10)).toBe(0)
+    expect(dropAt(mids, 0, 35)).toBe(1)
+    expect(dropAt(mids, 0, 99)).toBe(2)
+    expect(dropAt(mids, 2, 25)).toBe(1)
+    expect(dropAt(mids, 2, -5)).toBe(0)
   })
 })

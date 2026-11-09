@@ -56,7 +56,7 @@ pub struct App {
 }
 
 const SHELL_OPS: [&str; 10] = ["repos", "pins", "setPins", "prefs", "setPrefs", "findRepos", "pickFolder", "ai", "setAi", "openRepo"];
-const REPO_OPS: [&str; 50] = [
+const REPO_OPS: [&str; 51] = [
     "load",
     "init",
     "files",
@@ -104,6 +104,7 @@ const REPO_OPS: [&str; 50] = [
     "aiContext",
     "termStart",
     "termList",
+    "termOrder",
     "agentSessions",
     "termStop",
     "aiAsk",
@@ -467,6 +468,11 @@ impl App {
                 )?)
             }
             "termList" => val(self.terms.list(repo)),
+            "termOrder" => {
+                let ids = b.get("ids").as_array().map(|a| a.iter().map(term_id).collect::<Result<Vec<_>>>()).unwrap_or(Ok(vec![]))?;
+                self.terms.order(repo, &ids);
+                done()
+            }
             "agentSessions" => val(sessions::agent_sessions(repo, self.terms.held(repo), env).await),
             "termStop" => {
                 if b.truthy("all") {
