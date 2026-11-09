@@ -139,6 +139,7 @@ export function createServer({ dir, root = dir, uiDir, token, stateFile = STATE 
       return terms.start(repo, termId(b.id), kind, String(b.agent ?? ''), b.cols, b.rows, process.env, b.resume ? String(b.resume) : undefined)
     },
     termList: (repo) => terms.list(repo),
+    termOrder: (repo, b) => terms.order(repo, [b.ids ?? []].flat().map(termId)),
     agentSessions: (repo) => agentSessions(repo, terms.held(repo)),
     termStop: (repo, b) => terms.stop(repo, b.all ? undefined : termId(b.id)),
     aiAsk: async (repo, b, res) => {

@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'preact/hooks'
 import { DEFAULT_PROMPTS } from '../git/ai'
 import type { AiInfo, AiSettings, AiTask, Backend, TermKind, TermLink } from '../git/backend'
 import { COLORS } from '../git/scheme'
-import { Icon } from './bits'
+import { Icon, webUrl } from './bits'
 import { Buttons, Frame } from './Dialogs'
 
 const PROMPT_LABELS: Record<AiTask, string> = {
@@ -122,16 +122,24 @@ export function AgentTerminal(p: {
   useEffect(() => {
     let gone = false
     let cleanup = () => {}
-    Promise.all([import('@xterm/xterm'), import('@xterm/addon-fit'), import('@xterm/addon-webgl'), import('@xterm/xterm/css/xterm.css')]).then(([{ Terminal }, { FitAddon }, { WebglAddon }]) => {
+    Promise.all([import('@xterm/xterm'), import('@xterm/addon-fit'), import('@xterm/addon-webgl'), import('@xterm/addon-web-links'), import('@xterm/xterm/css/xterm.css')]).then(([{ Terminal }, { FitAddon }, { WebglAddon }, { WebLinksAddon }]) => {
       const el = host.current
       if (gone || !el) return
       const theme = () => {
         const ansi = ANSI.map((name, i) => [name, cssVar(`--ansi-${i}`) || undefined])
         return { background: cssVar('--bg'), foreground: cssVar('--fg'), cursor: cssVar('--fg'), selectionBackground: cssVar('--selected'), ...Object.fromEntries(ansi) }
       }
-      const xt = new Terminal({ fontFamily: cssVar('--mono') || 'monospace', fontSize: 12, cursorBlink: true, theme: theme() })
+      // A web link opens in the browser on ⌘-click (Ctrl-click elsewhere), as in other terminals, so a plain click
+      // still selects text and reaches the program. It is the links a program marks (OSC 8) or any URL it prints.
+      const follow = (e: MouseEvent, uri: string) => {
+        const url = webUrl(uri)
+        if (url && (e.metaKey || e.ctrlKey)) window.open(url, '_blank', 'noopener,noreferrer')
+      }
+      const hint = { hover: () => (el.title = `${/Mac/.test(navigator.platform) ? '⌘' : 'Ctrl'}-click to open the link`), leave: () => el.removeAttribute('title') }
+      const xt = new Terminal({ fontFamily: cssVar('--mono') || 'monospace', fontSize: 12, cursorBlink: true, theme: theme(), linkHandler: { activate: follow, ...hint } })
       const fit = new FitAddon()
       xt.loadAddon(fit)
+      xt.loadAddon(new WebLinksAddon(follow, hint))
       xt.open(el)
       // The GPU renderer, made again whenever the tab shows without one: past the browser's limit on contexts, the
       // oldest tab loses its own and xterm's DOM renderer takes over until then.

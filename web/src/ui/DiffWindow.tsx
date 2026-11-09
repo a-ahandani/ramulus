@@ -1,8 +1,9 @@
+import type { JSX } from 'preact'
 import { useEffect, useRef, useState } from 'preact/hooks'
 import type { Backend, FileVersions, PrChange, PullRequest } from '../git/backend'
 import { mixedEol } from '../git/chunk'
 import type { FileChange, WorkStatus } from '../git/repo'
-import { Icon, PR_ICON, SHOW_IN_FILES, short } from './bits'
+import { Icon, PR_ICON, SHOW_IN_FILES, short, sortDrag, sortKey } from './bits'
 import { PrView } from './PrView'
 import { ReviewPane } from './Review'
 import type { FileSel } from './DetailPanel'
@@ -144,23 +145,37 @@ export function DiffWindow(p: {
   onStage: (files: FileChange[]) => void
   onUnstage: (paths: string[]) => void
   busy: boolean
+  onReorder: (from: number, to: number) => void
+  /** the agent and terminal tabs, which sit after the files */
+  termTabs: JSX.Element[]
+  /** the buttons for the agent or terminal tab in front */
+  termActions?: JSX.Element | false
+  termPanes: JSX.Element
+  /** an agent or terminal tab is the one in front */
+  termShown: boolean
 }) {
   const [max, setMax] = useState(false)
   const handles = useRef(new Map<string, PaneHandle>())
   const strip = useRef<HTMLDivElement>(null)
   const current = p.tabs.find((t) => t.key === p.active) ?? p.tabs[0]
-  const h = () => handles.current.get(current.key)
-  const live = (key: string) => !p.onGraph && key === current.key
+  /** the file tab in front, if one is */
+  const doc = p.onGraph || p.termShown ? undefined : current
+  const h = () => doc && handles.current.get(doc.key)
+  const live = (key: string) => key === doc?.key
 
+  // whichever tab comes to the front scrolls into view, without fighting a strip scrolled by hand in between
+  const fronted = useRef<Element | null>(null)
   useEffect(() => {
-    strip.current?.querySelector('.tab.active')?.scrollIntoView({ block: 'nearest', inline: 'nearest' })
-  }, [current.key, p.onGraph])
+    const el = strip.current?.querySelector('.tab.active') ?? null
+    if (el !== fronted.current) el?.scrollIntoView({ block: 'nearest', inline: 'nearest' })
+    fronted.current = el
+  })
 
   const toggle = (k: 'wrap' | 'collapse') => p.onOptions({ ...p.options, [k]: !p.options[k] })
-  const parts = current.sel.path.split('/')
+  const parts = doc?.sel.path.split('/') ?? []
 
   return (
-    <div class={`diff-window ${p.onGraph ? 'on-graph' : max ? 'max' : ''}`} role="region" aria-label="Diff">
+    <div class={`diff-window ${p.onGraph ? 'on-graph' : max ? 'max' : ''}`} role="region" aria-label="Editor">
       <div class="diff-tabs" onDblClick={(e) => !p.onGraph && !(e.target as Element).closest('button, .tab') && setMax(!max)}>
         <div
           class={`tab pinned ${p.onGraph ? 'active' : ''}`}
@@ -179,11 +194,12 @@ export function DiffWindow(p: {
           <span class="name">Graph</span>
         </div>
         <div class="tab-strip" ref={strip}>
-          {p.tabs.map((t) => {
+          {p.tabs.map((t, i) => {
             const name = t.pr ? `#${t.pr.number}` : t.review ? 'Review' : t.sel.path.slice(t.sel.path.lastIndexOf('/') + 1)
             return (
               <div
                 key={t.key}
+                data-sort="file"
                 class={`tab ${live(t.key) ? 'active' : ''} ${t.dirty ? 'dirty' : ''}`}
                 title={t.pr ? t.pr.title : t.file ? t.sel.path : t.review ? `Every change (${describe(t.sel)})` : `${t.sel.path} (${describe(t.sel)})`}
                 role="tab"
@@ -191,7 +207,7 @@ export function DiffWindow(p: {
                 aria-selected={live(t.key)}
                 onClick={() => p.onActivate(t.key)}
                 onKeyDown={(e) => {
-                  if (e.key !== 'Enter' && e.key !== ' ') return
+                  if (e.key !== 'Enter' && e.key !== ' ') return sortKey(e, 'x', i, p.tabs.length, p.onReorder)
                   e.preventDefault()
                   p.onActivate(t.key)
                 }}
@@ -200,6 +216,7 @@ export function DiffWindow(p: {
                   e.preventDefault()
                   p.onCloseTab(t.key)
                 }}
+                onPointerDown={(e) => sortDrag(e, 'x', p.onReorder)}
               >
                 <Icon name={t.pr ? PR_ICON[t.pr.state] : t.file ? 'file' : t.review ? 'diff-multiple' : 'diff'} />
                 <span class="name">{name}</span>
@@ -222,24 +239,25 @@ export function DiffWindow(p: {
               </div>
             )
           })}
+          {p.termTabs}
         </div>
         <div class="actions">
-          {current.dirty && (
+          {doc?.dirty && (
             <button class="icon" title="Save (⌘S)" onClick={() => h()?.save()}>
               <Icon name="save" />
             </button>
           )}
-          {p.onOpen && current.sel.area.kind !== 'commit' && !current.pr && !current.review && (
-            <button class="icon" title="Open File" onClick={() => p.onOpen!(current.sel)}>
+          {p.onOpen && doc && doc.sel.area.kind !== 'commit' && !doc.pr && !doc.review && (
+            <button class="icon" title="Open File" onClick={() => p.onOpen!(doc.sel)}>
               <Icon name="go-to-file" />
             </button>
           )}
-          {p.onReveal && current.sel.area.kind !== 'commit' && !current.pr && !current.review && (
-            <button class="icon" title={SHOW_IN_FILES} onClick={() => p.onReveal!(current.sel)}>
+          {p.onReveal && doc && doc.sel.area.kind !== 'commit' && !doc.pr && !doc.review && (
+            <button class="icon" title={SHOW_IN_FILES} onClick={() => p.onReveal!(doc.sel)}>
               <Icon name="folder-opened" />
             </button>
           )}
-          {!current.file && !current.pr && !current.review && (
+          {doc && !doc.file && !doc.pr && !doc.review && (
             <>
               <button class="icon" title="Previous Change" onClick={() => h()?.prev()}>
                 <Icon name="arrow-up" />
@@ -252,28 +270,35 @@ export function DiffWindow(p: {
               </button>
             </>
           )}
-          {!current.file && !current.pr && (
+          {doc && !doc.file && !doc.pr && (
             <>
               <button class={`icon ${p.options.mode === 'inline' ? 'on' : ''}`} title="Toggle Inline View" onClick={() => p.onOptions({ ...p.options, mode: p.options.mode === 'split' ? 'inline' : 'split' })}>
                 <Icon name="diff-single" />
               </button>
             </>
           )}
-          {!current.pr && (
+          {doc && !doc.pr && (
             <button class={`icon ${p.options.wrap ? 'on' : ''}`} title="Toggle Word Wrap" onClick={() => toggle('wrap')}>
               <Icon name="word-wrap" />
             </button>
           )}
-          <span class="sep" />
-          <button class="icon" title={max ? 'Restore' : 'Maximize'} onClick={() => setMax(!max)}>
-            <Icon name={max ? 'screen-normal' : 'screen-full'} />
-          </button>
-          <button class="icon" title="Close all" onClick={p.onCloseAll}>
-            <Icon name="close" />
-          </button>
+          {p.termShown && p.termActions}
+          {!p.onGraph && (
+            <>
+              <span class="sep" />
+              <button class="icon" title={max ? 'Restore' : 'Maximize'} onClick={() => setMax(!max)}>
+                <Icon name={max ? 'screen-normal' : 'screen-full'} />
+              </button>
+            </>
+          )}
+          {p.tabs.length > 0 && (
+            <button class="icon" title="Close every file tab" onClick={p.onCloseAll}>
+              <Icon name="close" />
+            </button>
+          )}
         </div>
       </div>
-      {!current.pr && !current.review && (
+      {doc && !doc.pr && !doc.review && (
         <div class="breadcrumbs">
           {parts.map((s, i) => (
             <span key={i} class="crumb">
@@ -284,6 +309,7 @@ export function DiffWindow(p: {
           ))}
         </div>
       )}
+      {p.termPanes}
       {p.tabs.map((t) =>
         t.pr ? (
           <div key={t.key} class="diff-pane" hidden={!live(t.key)}>
