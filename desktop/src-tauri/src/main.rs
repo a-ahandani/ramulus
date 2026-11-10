@@ -113,6 +113,13 @@ fn main() {
                 .title("Ramulus")
                 .inner_size(1280.0, 820.0)
                 .min_inner_size(720.0, 480.0)
+                // the webview opens no windows of its own, so links (target=_blank, window.open) go to the system browser
+                .on_new_window(|url, _| {
+                    if matches!(url.scheme(), "http" | "https") {
+                        let _ = ramulus::git::open_external(url.as_str().as_ref());
+                    }
+                    tauri::webview::NewWindowResponse::Deny
+                })
                 .build()?;
             watch_updates(tauri_app.handle().clone());
             Ok(())

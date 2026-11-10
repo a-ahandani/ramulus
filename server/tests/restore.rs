@@ -20,6 +20,8 @@ fn brings_terminal_tabs_back_after_the_helper_restarts() {
     let start = || {
         let mut cfg = config(Some(&repo), &repo, &root.join("state"));
         cfg.env = env_with_path(&bin);
+        // like an app opened from the Dock
+        cfg.env.retain(|k, _| !["LANG", "LC_ALL", "LC_CTYPE"].contains(&k.as_str()));
         for (k, v) in [
             ("SHELL", "/bin/sh"),
             ("SHOWARGS", "1"),
@@ -34,8 +36,8 @@ fn brings_terminal_tabs_back_after_the_helper_restarts() {
     srv.result("setAi", json!({ "settings": { "enabled": true } }));
     srv.result("termStart", json!({ "id": "sh", "kind": "shell", "cols": 80, "rows": 24 }));
     let mut sh = srv.term(s(&repo), "sh");
-    sh.input("echo kept-$((40+2))\r");
-    sh.until("kept-42");
+    sh.input("echo kept-$((40+2)) $LANG\r");
+    sh.until("kept-42 en_US.UTF-8");
     // a second helper beside this one leaves its saved tabs alone
     assert_eq!(start().result("termList", json!({})), json!([]));
     srv.result("termStart", json!({ "id": "ai", "agent": "claude", "cols": 80, "rows": 24 }));
