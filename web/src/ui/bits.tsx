@@ -99,6 +99,13 @@ export function sessionMeta(s: AgentSession, agentName: string): string {
 
 export const webUrl = (url: string) => (/^https?:\/\//i.test(url) ? url : undefined)
 
+/** Adds a tab once. A new preview tab takes the place of the old one, which nobody edited or double-clicked. */
+export const openTab = <T extends { key: string; preview?: boolean }>(ts: T[], tab: T): T[] => {
+  if (ts.some((t) => t.key === tab.key)) return ts
+  const i = ts.findIndex((t) => t.preview)
+  return tab.preview && i >= 0 ? ts.map((t, j) => (j === i ? tab : t)) : [...ts, tab]
+}
+
 export const PR_ICON = { OPEN: 'git-pull-request', DRAFT: 'git-pull-request-draft', MERGED: 'git-merge', CLOSED: 'git-pull-request-closed' }
 
 export function prsByBranch(list: PullRequest[]): Map<string, PullRequest> {

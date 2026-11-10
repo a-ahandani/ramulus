@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { ago, cannotFastForward, ciByCommit, ciState, dropAt, finished, moved, githubOwner, mergedBranches, prsByBranch, sessionMeta, settleLimited, termTitle, tokenCount, webUrl, wipTally } from './bits'
+import { ago, cannotFastForward, ciByCommit, ciState, dropAt, finished, moved, githubOwner, mergedBranches, prsByBranch, sessionMeta, settleLimited, termTitle, tokenCount, webUrl, wipTally, openTab } from './bits'
 
 describe('settleLimited', () => {
   it('never runs more than the limit at once and keeps results in order', async () => {
@@ -37,6 +37,20 @@ describe('ago', () => {
     expect(ago(now - 3 * 3600, true)).toBe('3h')
     expect(ago(now - 2 * 86400, true)).toBe('2d')
     expect(ago(now - 20, true)).toBe('now')
+  })
+})
+
+describe('openTab', () => {
+  it('puts a newly opened file in place of the untouched one, and keeps the rest', () => {
+    const kept = { key: 'a' }
+    const peek = { key: 'b', preview: true }
+    const next = { key: 'c', preview: true }
+    expect(openTab([peek, kept], next)).toEqual([next, kept])
+    expect(openTab([kept], next)).toEqual([kept, next])
+    // a PR or Review tab never replaces anything
+    expect(openTab([kept, peek], { key: 'pr' })).toEqual([kept, peek, { key: 'pr' }])
+    const ts = [kept, peek]
+    expect(openTab(ts, { key: 'a', preview: true })).toBe(ts)
   })
 })
 

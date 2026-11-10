@@ -6,7 +6,7 @@ import { PAGE, type Commit, type DiffArea, type FileChange, type NetSettings, ty
 import type { Scheme } from '../git/scheme'
 import { AiConsent, AiSettingsDialog } from './Ai'
 import { useAgentPanel } from './AgentPanel'
-import { BrandMark, CI_WORD, Icon, RepoMark, SHOW_IN_FILES, SHOW_REPO_IN_FILES, cannotFastForward, ciByCommit, ciState, clamp, laneColor, mergedBranches, moved, prsByBranch, short, stored, webUrl, wipTally } from './bits'
+import { BrandMark, CI_WORD, Icon, RepoMark, SHOW_IN_FILES, SHOW_REPO_IN_FILES, cannotFastForward, ciByCommit, ciState, clamp, laneColor, mergedBranches, moved, prsByBranch, openTab, short, stored, webUrl, wipTally } from './bits'
 import { DetailPanel, type FileSel } from './DetailPanel'
 import { PrCard } from './PrView'
 import { DiffWindow, tabKey, type DiffOptions, type DiffTab } from './DiffWindow'
@@ -822,22 +822,22 @@ export function App(p: { be: Backend; name: string; active: boolean; theme: Them
   }
   const openFile = (f: FileSel) => {
     const key = tabKey(f)
-    setDiffTabs((ts) => (ts.some((t) => t.key === key) ? ts : [...ts, { key, sel: f, dirty: false }]))
+    setDiffTabs((ts) => openTab(ts, { key, sel: f, dirty: false, preview: true }))
     showTab(key)
   }
   const openPr = (pr: PullRequest) => {
     const key = `pr:${pr.number}`
-    setDiffTabs((ts) => (ts.some((t) => t.key === key) ? ts : [...ts, { key, sel: { area: { kind: 'unstaged' }, path: `#${pr.number}` }, dirty: false, pr }]))
+    setDiffTabs((ts) => openTab(ts, { key, sel: { area: { kind: 'unstaged' }, path: `#${pr.number}` }, dirty: false, pr }))
     showTab(key)
   }
   const openReview = (area: DiffArea) => {
     const key = `review:${area.kind}:${area.kind === 'commit' ? area.oid : ''}`
-    setDiffTabs((ts) => (ts.some((t) => t.key === key) ? ts : [...ts, { key, sel: { area, path: '' }, dirty: false, review: true }]))
+    setDiffTabs((ts) => openTab(ts, { key, sel: { area, path: '' }, dirty: false, review: true }))
     showTab(key)
   }
   const openWorkFile = (path: string) => {
     const key = `file:${path}`
-    setDiffTabs((ts) => (ts.some((t) => t.key === key) ? ts : [...ts, { key, sel: { area: { kind: 'unstaged' }, path }, dirty: false, file: true }]))
+    setDiffTabs((ts) => openTab(ts, { key, sel: { area: { kind: 'unstaged' }, path }, dirty: false, file: true, preview: true }))
     showTab(key)
   }
   const dropTab = (key: string) => {
@@ -858,7 +858,9 @@ export function App(p: { be: Backend; name: string; active: boolean; theme: Them
   }
   const anyDirty = diffTabs.some((t) => t.dirty)
   useEffect(() => p.onDirty(anyDirty), [anyDirty])
-  const setTabDirty = (key: string, d: boolean) => setDiffTabs((ts) => ts.map((t) => (t.key === key && t.dirty !== d ? { ...t, dirty: d } : t)))
+  // an edit keeps the tab open for good, as a double-click does
+  const setTabDirty = (key: string, d: boolean) => setDiffTabs((ts) => ts.map((t) => (t.key === key && t.dirty !== d ? { ...t, dirty: d, preview: t.preview && !d } : t)))
+  const keepTab = (key: string) => setDiffTabs((ts) => ts.map((t) => (t.key === key && t.preview ? { ...t, preview: false } : t)))
 
   const switchRemote = (name: string) => {
     const v = view
@@ -1425,6 +1427,7 @@ export function App(p: { be: Backend; name: string; active: boolean; theme: Them
               panel.hide()
             }}
             onCloseTab={closeTab}
+            onKeepTab={keepTab}
             onCloseAll={closeAllTabs}
             onOptions={setDiffOptions}
             onDirty={setTabDirty}
