@@ -1822,6 +1822,10 @@ body.dragging * {
   margin-bottom: -1px;
 }
 
+.diff-tabs .tab.preview .name {
+  font-style: italic;
+}
+
 .diff-tabs .tab .name {
   flex: 0 1 auto;
   min-width: 0;

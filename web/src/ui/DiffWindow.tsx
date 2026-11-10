@@ -23,6 +23,8 @@ export interface DiffTab {
   pr?: PullRequest
   /** every change of sel.area in one scrolling list */
   review?: boolean
+  /** the next file opened takes this tab's place, until it is edited or double-clicked */
+  preview?: boolean
 }
 
 type PaneHandle = DiffEditorHandle & { save: () => void }
@@ -132,6 +134,7 @@ export function DiffWindow(p: {
   onGraph: boolean
   onShowGraph: () => void
   onCloseTab: (key: string) => void
+  onKeepTab: (key: string) => void
   onCloseAll: () => void
   onOptions: (o: DiffOptions) => void
   onDirty: (key: string, dirty: boolean) => void
@@ -200,16 +203,19 @@ export function DiffWindow(p: {
               <div
                 key={t.key}
                 data-sort="file"
-                class={`tab ${live(t.key) ? 'active' : ''} ${t.dirty ? 'dirty' : ''}`}
+                class={`tab ${live(t.key) ? 'active' : ''} ${t.dirty ? 'dirty' : ''} ${t.preview ? 'preview' : ''}`}
                 title={t.pr ? t.pr.title : t.file ? t.sel.path : t.review ? `Every change (${describe(t.sel)})` : `${t.sel.path} (${describe(t.sel)})`}
                 role="tab"
                 tabIndex={0}
                 aria-selected={live(t.key)}
                 onClick={() => p.onActivate(t.key)}
+                onDblClick={() => p.onKeepTab(t.key)}
                 onKeyDown={(e) => {
                   if (e.key !== 'Enter' && e.key !== ' ') return sortKey(e, 'x', i, p.tabs.length, p.onReorder)
                   e.preventDefault()
                   p.onActivate(t.key)
+                  // the keyboard's double-click: Enter keeps a preview tab open
+                  if (e.key === 'Enter') p.onKeepTab(t.key)
                 }}
                 onMouseDown={(e) => {
                   if (e.button !== 1) return
