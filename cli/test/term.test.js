@@ -36,12 +36,14 @@ describe('terminals', () => {
 
   it('brings tabs back after the helper restarts', { skip: process.platform === 'win32' }, async () => {
     const dir = join(root, 'state')
-    const env = { ...process.env, SHELL: '/bin/sh' }
+    // no locale, like an app opened from the Dock
+    const { LANG, LC_ALL, LC_CTYPE, ...rest } = process.env
+    const env = { ...rest, SHELL: '/bin/sh' }
     const first = createTerminals(dir)
     await first.start(root, 'sh', 'shell', '', 80, 24, env)
     const seen = watch(first, 'sh')
-    first.write(root, 'sh', 'printf "\\033]0;%s\\007" titled; echo kept-$((40+2))\r')
-    await seen('kept-42')
+    first.write(root, 'sh', 'printf "\\033]0;%s\\007" titled; echo kept-$((40+2)) $LANG\r')
+    await seen('kept-42 en_US.UTF-8')
     // a second helper beside this one leaves its saved tabs alone
     assert.deepEqual(createTerminals(dir).list(root), [])
     assert.deepEqual(first.list(root), [{ id: 'sh', kind: 'shell', agent: undefined, title: 'titled' }])

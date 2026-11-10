@@ -786,7 +786,13 @@ pub fn open_external(target: &OsStr) -> Result<()> {
         c
     } else if cfg!(windows) {
         let mut c = Command::new("cmd");
-        c.args(["/c", "start", ""]).arg(target);
+        c.args(["/c", "start", ""]);
+        // in quotes cmd reads & | ^ as text; a URL or Windows file name never holds a bare "
+        let mut quoted = std::ffi::OsString::from("\"");
+        quoted.push(target);
+        quoted.push("\"");
+        #[cfg(windows)]
+        c.raw_arg(quoted);
         c
     } else {
         let mut c = Command::new("xdg-open");

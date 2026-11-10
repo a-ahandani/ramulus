@@ -589,6 +589,10 @@ impl Terminals {
         }
         cmd.env("TERM", "xterm-256color");
         cmd.env("COLORTERM", "truecolor");
+        // Apps opened from the Dock get no locale, and the shell then can't read non-ASCII keys like Farsi.
+        if ["LC_ALL", "LC_CTYPE", "LANG"].iter().all(|k| var(env, k).unwrap_or("").is_empty()) {
+            cmd.env("LANG", "en_US.UTF-8");
+        }
         let child = pair.slave.spawn_command(cmd).map_err(|e| Error(e.to_string()))?;
         drop(pair.slave);
         let reader = pair.master.try_clone_reader().map_err(|e| Error(e.to_string()))?;

@@ -189,7 +189,7 @@ export function createTerminals(dir) {
       const [file, args] = command(s.kind, s.agent, extra, env)
       const pty = await loadPty()
       if (!pty) throw new Error('The terminal is not available on this system')
-      const proc = pty.spawn(file, args, { name: 'xterm-256color', cols: c, rows: r, cwd: repo, env: { ...env, TERM: 'xterm-256color', COLORTERM: 'truecolor' } })
+      const proc = pty.spawn(file, args, { name: 'xterm-256color', cols: c, rows: r, cwd: repo, env: { ...env, ...(!(env.LC_ALL || env.LC_CTYPE || env.LANG) && { LANG: 'en_US.UTF-8' }), TERM: 'xterm-256color', COLORTERM: 'truecolor' } })
       s.proc = proc
       s.started = Date.now()
       sessions.set(k, s)
