@@ -373,8 +373,9 @@ export function openPath(dir, path) {
   const full = insideRepo(dir, path)
   if (!existsSync(full)) throw new Error('That file no longer exists')
   const cmd = process.platform === 'darwin' ? 'open' : process.platform === 'win32' ? 'cmd' : 'xdg-open'
-  const args = process.platform === 'win32' ? ['/c', 'start', '', full] : [full]
-  detach(cmd, args)
+  // in quotes cmd reads & | ^ as text; a Windows file name never holds a "
+  const args = process.platform === 'win32' ? ['/c', 'start', '""', `"${full}"`] : [full]
+  detach(cmd, args, { windowsVerbatimArguments: true })
 }
 
 // the freedesktop interface selects the file itself; a desktop without it gets the folder instead
