@@ -155,6 +155,9 @@ export function AgentTerminal(p: {
             a.dispose()
             if (gl === a) gl = undefined
           })
+          // Its glyph cache garbles letters once it merges pages, which a long session always reaches, so it starts
+          // afresh after each merge (the only time it removes a page). Seen with @xterm/addon-webgl 0.19.
+          a.onRemoveTextureAtlasCanvas(() => queueMicrotask(() => gl === a && a.clearTextureAtlas()))
           gl = a
         } catch {
           noGpu = true
