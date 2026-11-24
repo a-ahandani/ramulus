@@ -155,6 +155,17 @@ export function AgentTerminal(p: {
             a.dispose()
             if (gl === a) gl = undefined
           })
+          // Its glyph cache, shared by all tabs, garbles letters after it merges pages (the only time it removes one), which
+          // a long session always reaches, and clearTextureAtlas stops working after a few merges. So every tab drops its
+          // renderer and the cache with it, and a showing tab makes a fresh one once all have. Seen with addon-webgl 0.19.
+          a.onRemoveTextureAtlasCanvas(() =>
+            queueMicrotask(() => {
+              if (gl !== a) return
+              a.dispose()
+              gl = undefined
+              setTimeout(() => !gone && el.clientWidth && gpu())
+            }),
+          )
           gl = a
         } catch {
           noGpu = true
